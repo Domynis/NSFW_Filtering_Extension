@@ -4,5 +4,15 @@
     "manifest_version": 3,
     "icons": {
         "512": "images/icon512.png"
-    }
+    },
+    "background": {
+        "service_worker": "service_worker.js"
+    },
+    "action": {},
+    "permissions": [
+        "scripting"
+    ],
+    "host_permissions": [
+        "<all_urls>"
+    ]
 }
