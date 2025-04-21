@@ -1,0 +1,20 @@
+{
+    "name": "NSFW Filtering Extension",
+    "version": "1.0.0",
+    "manifest_version": 3,
+    "icons": {
+        "512": "images/icon512.png"
+    },
+    "background": {
+        "service_worker": "service_worker.js"
+    },
+    "action": {
+        "default_popup": "index.html"
+    },
+    "permissions": [
+        "scripting"
+    ],
+    "host_permissions": [
+        "<all_urls>"
+    ]
+}
