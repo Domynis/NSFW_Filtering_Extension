@@ -1,6 +1,6 @@
 {
     "name": "NSFW Filtering Extension",
-    "version": "1.0",
+    "version": "1.0.0",
     "manifest_version": 3,
     "icons": {
         "512": "images/icon512.png"
