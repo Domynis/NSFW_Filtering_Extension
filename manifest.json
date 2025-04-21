@@ -8,7 +8,9 @@
     "background": {
         "service_worker": "service_worker.js"
     },
-    "action": {},
+    "action": {
+        "default_popup": "index.html"
+    },
     "permissions": [
         "scripting"
     ],
