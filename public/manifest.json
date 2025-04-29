@@ -16,5 +16,16 @@
     ],
     "host_permissions": [
         "<all_urls>"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "model_tfjs_saved_model/model.json",
+                "model_tfjs_saved_model/*.bin"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
     ]
 }
