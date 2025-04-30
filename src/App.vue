@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import NSFWFilter from './components/NSFWFilter.vue'
+import Popup from './components/Popup.vue';
 
 </script>
 
 <template>
-  <NSFWFilter msg="NSFW Filter" />
+  <Popup />
 </template>
 
-<style scoped>
-</style>
+<style scoped></style>
