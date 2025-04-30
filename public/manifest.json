@@ -6,15 +6,29 @@
         "512": "images/icon512.png"
     },
     "background": {
-        "service_worker": "service_worker.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
     "action": {
         "default_popup": "index.html"
     },
     "permissions": [
-        "scripting"
+        "scripting",
+        "storage",
+        "activeTab"
     ],
     "host_permissions": [
         "<all_urls>"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "model_tfjs_saved_model/model.json",
+                "model_tfjs_saved_model/*.bin"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
     ]
 }
