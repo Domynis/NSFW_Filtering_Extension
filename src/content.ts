@@ -99,10 +99,36 @@ import * as tf from '@tensorflow/tfjs'; // Import TensorFlow.js library
         if (originalSrc.startsWith('data:image')) {
             console.log(`CS: Using existing data URL for: ${originalSrc.substring(0, 100)}`);
             imageDataSource = originalSrc;
+        } else if (originalSrc.startsWith('./') || originalSrc.startsWith('../') || originalSrc.startsWith('/')) {
+            try {
+                // This creates an absolute URL from a relative one based on the current document's base URL
+                const absoluteUrl = new URL(originalSrc, document.baseURI).href;
+                console.log(`CS: Converting relative path "${originalSrc}" to absolute URL: ${absoluteUrl}`);
+
+                const response = await chrome.runtime.sendMessage({
+                    type: 'FETCH_IMAGE_DATAURL',
+                    url: absoluteUrl,
+                    isLocalPath: true // Flag this as a local path conversion
+                });
+
+                if (response?.status === 'success' && response.dataUrl) {
+                    console.log(`CS: Received data URL for local image: ${absoluteUrl}`);
+                    imageDataSource = response.dataUrl;
+                } else {
+                    fetchError = `Failed to get data URL for local image: ${response?.message || 'Unknown background error'}`;
+                    console.error(`CS: ${fetchError} for ${originalSrc} (${absoluteUrl})`);
+                }
+            } catch (error: any) {
+                fetchError = `Error processing local image path: ${error.message}`;
+                console.error(`CS: ${fetchError} for ${originalSrc}`);
+            }
         } else if (originalSrc.startsWith('http:') || originalSrc.startsWith('https:')) {
             console.log(`CS: Requesting data URL via background for: ${originalSrc.substring(0, 100)}`);
             try {
-                const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_DATAURL', url: originalSrc });
+                const response = await chrome.runtime.sendMessage({
+                    type: 'FETCH_IMAGE_DATAURL',
+                    url: originalSrc
+                });
                 if (response?.status === 'success' && response.dataUrl) {
                     console.log(`CS: Received data URL for: ${originalSrc.substring(0, 100)}`);
                     imageDataSource = response.dataUrl;
@@ -113,7 +139,6 @@ import * as tf from '@tensorflow/tfjs'; // Import TensorFlow.js library
             } catch (error: any) {
                 fetchError = `Error communicating with background: ${error.message}`;
                 console.error(`CS: ${fetchError} for ${originalSrc}`);
-                // If background communication fails, it might be fatal - consider stopping?
             }
         } else {
             console.log(`CS: Skipping image with non-http(s)/data src: ${originalSrc.substring(0, 100)}`);
