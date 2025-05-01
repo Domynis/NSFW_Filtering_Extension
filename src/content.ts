@@ -256,8 +256,8 @@
             imgElement.style.filter = style.filter;
             imgElement.style.opacity = style.opacity;
             // Optionally remove dataset markers? Or leave them? Let's remove classification status.
-            // delete imgElement.dataset.nsfwClassified;
-            // delete imgElement.dataset.nsfwOriginalSrc;
+            delete imgElement.dataset.nsfwClassified;
+            delete imgElement.dataset.nsfwOriginalSrc;
         });
         modifiedImages.clear(); // Clear the map
         processingImages.clear(); // Clear processing set
