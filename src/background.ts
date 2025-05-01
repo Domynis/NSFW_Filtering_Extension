@@ -57,6 +57,44 @@ async function updateContentScriptState(tabId: number, active: boolean): Promise
     }
 }
 
+async function fetchImageAsDataUrl(imageUrl: string, isLocalPath: boolean = false): Promise<string> {
+    console.log(`BG: Fetching image: ${imageUrl.substring(0, 100)}, isLocalPath: ${isLocalPath}`);
+
+    try {
+        const fetchOptions: RequestInit = {
+            mode: isLocalPath ? 'cors' : 'no-cors', // Local paths can use CORS, remote may need no-cors
+            cache: 'force-cache',
+            credentials: isLocalPath ? 'same-origin' : 'omit', // Only send credentials for same-origin
+        };
+
+        const response = await fetch(imageUrl, fetchOptions);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status} for ${imageUrl}`);
+        }
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.startsWith('image/')) {
+            console.warn(`BG: Content type for ${imageUrl} is not image/* (${contentType}). Attempting blob conversion anyway.`);
+        }
+
+        const blob = await response.blob();
+
+        // Convert blob to data URL
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = (error) => {
+                console.error('BG: FileReader error:', error);
+                reject(new Error('FileReader error'));
+            };
+            reader.readAsDataURL(blob);
+        });
+    } catch (error: any) {
+        console.error(`BG: Fetch/Process error for ${imageUrl}:`, error);
+        throw error; // Re-throw for proper handling by caller
+    }
+}
 
 // --- Message Listeners ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -85,51 +123,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Indicates asynchronous response is expected
     }
 
-    // Listener for image fetch requests from content script
+    // Enhanced listener for image fetch requests from content script
     if (message.type === 'FETCH_IMAGE_DATAURL' && message.url) {
         const imageUrl: string = message.url;
-        console.log(`BG: Received FETCH_IMAGE_DATAURL request for: ${imageUrl.substring(0, 100)}`);
+        const isLocalPath: boolean = !!message.isLocalPath; // If flag is provided
 
-        // Basic URL validation
-        if (!imageUrl.startsWith('http:') && !imageUrl.startsWith('https:')) {
+        console.log(`BG: Received FETCH_IMAGE_DATAURL request for: ${imageUrl.substring(0, 100)}, isLocalPath: ${isLocalPath}`);
+
+        // Basic URL validation - modified to allow local paths when flagged
+        if (!isLocalPath && !imageUrl.startsWith('http:') && !imageUrl.startsWith('https:')) {
             console.warn(`BG: Invalid image URL scheme: ${imageUrl}`);
             sendResponse({ status: 'error', message: 'Invalid URL scheme' });
             return false; // No async response needed
         }
 
-        fetch(imageUrl)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status} for ${imageUrl}`);
-                }
-                const contentType = response.headers.get('content-type');
-                if (!contentType || !contentType.startsWith('image/')) {
-                    // Optional: Still try to read as blob, maybe it works? Or reject.
-                    console.warn(`BG: Content type for ${imageUrl} is not image/* (${contentType}). Attempting blob conversion anyway.`);
-                    // throw new Error(`Non-image content type: ${contentType}`);
-                }
-                return response.blob();
-            })
-            .then(blob => {
-                // Check blob size? Might prevent issues with massive files.
-                // const MAX_SIZE = 10 * 1024 * 1024; // 10MB limit?
-                // if (blob.size > MAX_SIZE) throw new Error(`Image too large: ${blob.size} bytes`);
-
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    console.log(`BG: Sending data URL back for: ${imageUrl.substring(0, 100)}`);
-                    sendResponse({ status: 'success', dataUrl: reader.result as string });
-                };
-                reader.onerror = (error) => {
-                    console.error('BG: FileReader error:', error);
-                    sendResponse({ status: 'error', message: 'FileReader error' });
-                };
-                reader.readAsDataURL(blob);
+        // Use the enhanced fetch helper function
+        fetchImageAsDataUrl(imageUrl, isLocalPath)
+            .then(dataUrl => {
+                console.log(`BG: Successfully fetched image, sending data URL back for: ${imageUrl.substring(0, 100)}`);
+                sendResponse({ status: 'success', dataUrl });
             })
             .catch(error => {
-                console.error(`BG: Fetch/Process error for ${imageUrl}:`, error);
-                sendResponse({ status: 'error', message: error.message || 'Fetch failed' });
+                console.error(`BG: Error fetching image ${imageUrl}:`, error);
+                sendResponse({
+                    status: 'error',
+                    message: error.message || 'Failed to fetch image'
+                });
             });
+
         return true; // Indicates asynchronous response
     }
 
