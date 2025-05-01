@@ -1,4 +1,13 @@
+import * as tf from '@tensorflow/tfjs';
+
 const FILTER_STATE_KEY = 'isFilterActive';
+const MODEL_PATH = 'model_tfjs_saved_model/model.json'; // Relative path to model json
+const LABELS = ['drawing', 'hentai', 'neutral', 'porn', 'sexy']; // Keep labels here
+
+// --- Global State for Background ---
+let modelInstance: tf.GraphModel | null = null;
+let isModelLoading = false; // Prevent simultaneous load attempts
+let modelLoadPromise: Promise<tf.GraphModel | null> | null = null; // Store the promise
 
 // --- State Management ---
 async function setFilterState(active: boolean): Promise<void> {
@@ -10,6 +19,109 @@ async function getFilterState(): Promise<boolean> {
     // Default to false if not set
     const data = await chrome.storage.local.get({ [FILTER_STATE_KEY]: false });
     return !!data[FILTER_STATE_KEY];
+}
+
+async function loadModelInBackground(): Promise<tf.GraphModel | null> {
+    // If model already loaded, return it
+    if (modelInstance) {
+        console.log("BG: Model already loaded.");
+        return modelInstance;
+    }
+    // If model is currently loading, wait for the existing promise
+    if (isModelLoading && modelLoadPromise) {
+        console.log("BG: Model is currently loading, awaiting existing promise.");
+        return await modelLoadPromise;
+    }
+
+    // Start loading
+    console.log("BG: Attempting to load model...");
+    isModelLoading = true;
+    let localModelInstance: tf.GraphModel | null = null; // Use local var for promise result
+
+    modelLoadPromise = (async () => {
+        try {
+            const modelUrl = chrome.runtime.getURL(MODEL_PATH);
+            console.log("BG: Resolved model URL:", modelUrl);
+
+            // Optional: Set backend *before* loading model if needed
+            // await tf.setBackend('cpu');
+            // console.log(`BG: TF backend set to: ${tf.getBackend()}`);
+
+            localModelInstance = await tf.loadGraphModel(modelUrl);
+            console.log('BG: Model loaded successfully!');
+            return localModelInstance; // Resolve promise with loaded model
+        } catch (error) {
+            console.error('BG: Error loading model:', error);
+            localModelInstance = null; // Ensure null on failure
+            return null; // Resolve promise with null on error
+        } finally {
+            isModelLoading = false; // Reset loading flag regardless of outcome
+            modelInstance = localModelInstance; // Assign to global state *after* promise resolves/rejects
+            // modelLoadPromise = null; // Optionally clear promise? Maybe keep it for resilience.
+        }
+    })();
+
+    return await modelLoadPromise;
+}
+
+async function classifyImageData(imageDataUrl: string): Promise<string | null> {
+    const model = await loadModelInBackground(); // Ensure model is loaded
+    if (!model) {
+        console.error("BG: Model not available for classification.");
+        return 'error: model not loaded'; // Return specific error string
+    }
+
+    let tensor: tf.Tensor | null = null;
+    let prediction: tf.Tensor | tf.Tensor[] | null = null;
+    let outputTensor: tf.Tensor | null = null;
+
+    try {
+        // 1. Load Data URL into an ImageBitmap (more efficient than HTMLImageElement in workers)
+        // Note: HTMLImageElement cannot be created directly in service workers.
+        // Fetch the data URL blob first.
+        const response = await fetch(imageDataUrl);
+        if (!response.ok) throw new Error("Failed to fetch data URL blob");
+        const blob = await response.blob();
+        if (!blob.type.startsWith('image/')) throw new Error("Blob is not an image");
+
+        // Create ImageBitmap (works in Service Workers)
+        const imageBitmap = await createImageBitmap(blob);
+
+        // 2. Create Tensor
+        tensor = tf.browser.fromPixels(imageBitmap)
+            .resizeNearestNeighbor([224, 224]) // Match model input size
+            .toFloat()
+            .expandDims(0)
+            .div(255.0); // Assuming normalization [0, 1]
+
+        // 3. Predict
+        prediction = model.predict(tensor) as tf.Tensor; // Adjust cast as needed
+        outputTensor = Array.isArray(prediction) ? prediction[0] : prediction;
+        const data = await outputTensor?.data() as Float32Array;
+
+        // 4. Process Results
+        const maxProb = Math.max(...data);
+        const maxIndex = data.indexOf(maxProb);
+        const label = LABELS[maxIndex] ?? 'unknown';
+
+        console.log(`BG: Classification result: ${label} (${maxProb.toFixed(3)})`);
+        return label; // Return the classification label
+
+    } catch (error: any) {
+        console.error("BG: Error during classification:", error);
+        return `error: ${error.message}`; // Return specific error string
+    } finally {
+        // 5. Dispose Tensors (important!)
+        if (tensor) tensor.dispose();
+        if (outputTensor && outputTensor !== prediction) outputTensor.dispose(); // Dispose if different from prediction
+        if (prediction) {
+            if (Array.isArray(prediction)) {
+                prediction.forEach(t => t.dispose());
+            } else if (prediction instanceof tf.Tensor) {
+                prediction.dispose();
+            }
+        }
+    }
 }
 
 // --- Content Script Injection/Control ---
@@ -151,6 +263,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
             });
 
+        return true; // Indicates asynchronous response
+    }
+
+    if (message.type === 'CLASSIFY_IMAGE_DATAURL' && message.imageDataUrl) {
+        console.log("BG: Received CLASSIFY_IMAGE_DATAURL request.");
+        classifyImageData(message.imageDataUrl)
+            .then(label => {
+                if (label && label.startsWith('error:')) {
+                    sendResponse({ status: 'error', message: label });
+                } else if (label) {
+                    sendResponse({ status: 'success', label: label });
+                } else {
+                    // Should not happen if classifyImageData returns error strings
+                    sendResponse({ status: 'error', message: 'Unknown classification error' });
+                }
+            })
+            .catch(error => { // Catch unexpected errors in classifyImageData promise chain
+                console.error("BG: Unexpected error handling classification request:", error);
+                sendResponse({ status: 'error', message: error.message || 'Internal background error' });
+            });
         return true; // Indicates asynchronous response
     }
 
