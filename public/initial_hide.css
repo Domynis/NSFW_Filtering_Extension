@@ -1,51 +1,52 @@
-/*
- * Initially hide elements that the extension might process.
- * Use low specificity to be easily overridden by website styles initially,
- * but '!important' might be needed if websites aggressively style images.
- * Start with low opacity - less disruptive than visibility:hidden.
-*/
-img[src]:not([data-nsfw-classification="safe"]):not([data-nsfw-classification="error"]),
-/* video[src]:not([data-nsfw-classification="safe"]):not([data-nsfw-classification="error"]), */
-[data-nsfw-bg-check="pending"] {
-    /* We'll add this attribute temporarily */
-    opacity: 0.05 !important;
-    /* Start very low opacity */
-    filter: blur(1px);
-    /* Optional slight blur */
-    transition: opacity 0.2s ease-in-out;
-    /* Smooth transition when revealed */
+      
+/* public/initial_hide.css */
+
+/* Add a parent selector 'body.nsfw-filter-active' to all rules
+   so they only apply when the content script adds this class */
+
+/* Initial Pending/Hide State */
+body.nsfw-filter-active img[src]:not([data-nsfw-classification]), /* Initially has no attribute */
+body.nsfw-filter-active img[src][data-nsfw-classification="pending"],
+/* body.nsfw-filter-active video[src]:not([data-nsfw-classification]), */
+/* body.nsfw-filter-active video[src][data-nsfw-classification="pending"], */
+body.nsfw-filter-active [data-nsfw-bg-check="pending"]:not([data-nsfw-classification]) /* Add if using bg check */
+{
+  opacity: 0.05 !important;
+  /* filter: blur(1px); */
+  /* transition: opacity 0.2s ease-in-out; */
 }
 
-/* Style for elements confirmed NSFW */
-[data-nsfw-classification="porn"],
-[data-nsfw-classification="sexy"],
-[data-nsfw-classification="hentai"] {
+/* NSFW State */
+body.nsfw-filter-active [data-nsfw-classification="porn"],
+body.nsfw-filter-active [data-nsfw-classification="sexy"],
+body.nsfw-filter-active [data-nsfw-classification="hentai"]
+{
     opacity: 0.1 !important;
     filter: blur(20px) !important;
     transition: none;
-    /* Apply NSFW style immediately */
 }
 
-/* Style for elements confirmed SAFE or ERROR (make fully visible) */
-[data-nsfw-classification="safe"],
-[data-nsfw-classification="drawing"],
-[data-nsfw-classification="neutral"],
-[data-nsfw-classification="unknown"],
-[data-nsfw-classification^="error"],
-[data-nsfw-classification^="bg-error"],
-[data-nsfw-classification^="comm-error"],
-[data-nsfw-classification^="send-error"],
-[data-nsfw-classification^="fetch-error"],
-[data-nsfw-classification^="capture-error"],
-[data-nsfw-classification^="canvas-error"],
-[data-nsfw-classification^="capture-nodata"],
-[data-nsfw-classification^="load-error"],
-[data-nsfw-classification^="native-load-error"],
-[data-nsfw-classification^="zero-dimensions"] {
+/* Safe/Error/Revealed State - LIST ALL NON-NSFW and ERROR labels explicitly */
+body.nsfw-filter-active [data-nsfw-classification="safe"],
+body.nsfw-filter-active [data-nsfw-classification="drawing"],
+body.nsfw-filter-active [data-nsfw-classification="neutral"],
+body.nsfw-filter-active [data-nsfw-classification="unknown"],
+body.nsfw-filter-active [data-nsfw-classification^="error"], /* Catches general errors */
+body.nsfw-filter-active [data-nsfw-classification^="bg-error"],
+body.nsfw-filter-active [data-nsfw-classification^="comm-error"],
+body.nsfw-filter-active [data-nsfw-classification^="send-error"],
+body.nsfw-filter-active [data-nsfw-classification^="fetch-error"],
+body.nsfw-filter-active [data-nsfw-classification^="capture-error"],
+body.nsfw-filter-active [data-nsfw-classification^="canvas-error"],
+body.nsfw-filter-active [data-nsfw-classification^="capture-nodata"],
+body.nsfw-filter-active [data-nsfw-classification^="load-error"],
+body.nsfw-filter-active [data-nsfw-classification^="native-load-error"],
+body.nsfw-filter-active [data-nsfw-classification^="zero-dimensions"]
+ {
     opacity: 1 !important;
-    /* Restore full opacity */
     filter: none !important;
-    /* Remove any blur */
-    /* visibility: visible !important; */
-    /* Use if hiding with visibility */
 }
+
+/* --- IMPORTANT: No rules without 'body.nsfw-filter-active' --- */
+
+    

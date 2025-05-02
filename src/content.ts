@@ -14,6 +14,18 @@
     // const modifiedImages = new Map<HTMLImageElement, { filter: string; opacity: string }>();
     const processingItems = new Set<string>(); // Use originalSrc for images/bg, unique key for video
 
+    // --- Body Class Management ---
+    const BODY_CLASS_ACTIVE = 'nsfw-filter-active';
+    function setFilterActiveStyles(isActive: boolean) {
+        if (isActive) {
+            document.body.classList.add(BODY_CLASS_ACTIVE);
+            console.log("CS: Added body class:", BODY_CLASS_ACTIVE);
+        } else {
+            document.body.classList.remove(BODY_CLASS_ACTIVE);
+            console.log("CS: Removed body class:", BODY_CLASS_ACTIVE);
+        }
+    }
+
     // --- Classification Request ---
     async function requestClassification(imgElement: HTMLImageElement): Promise<void> {
         if (!isFilterGloballyActive) return;
@@ -40,9 +52,9 @@
         if (originalSrc.startsWith('data:image')) {
             imageDataSource = originalSrc;
         } else if (isLocalPathFlag || originalSrc.startsWith('http:') || originalSrc.startsWith('https:')) {
-             if(isLocalPathFlag) {
-                 try { fetchUrl = new URL(originalSrc, document.baseURI).href; }
-                 catch(e) { fetchError = `Invalid relative URL: ${originalSrc}`; console.error(fetchError); processingItems.delete(originalSrc); imgElement.dataset.nsfwClassification = "fetch-error"; return; }
+            if (isLocalPathFlag) {
+                try { fetchUrl = new URL(originalSrc, document.baseURI).href; }
+                catch (e) { fetchError = `Invalid relative URL: ${originalSrc}`; console.error(fetchError); processingItems.delete(originalSrc); imgElement.dataset.nsfwClassification = "fetch-error"; return; }
             }
             console.log(`CS: Requesting data URL via background for URL: ${fetchUrl.substring(0, 100)}`);
             try {
@@ -107,9 +119,9 @@
 
         if (node instanceof HTMLImageElement) {
             // Set initial pending state if src exists and not already classified
-             if (node.getAttribute('src') && (!node.dataset.nsfwClassification || node.dataset.nsfwClassification === 'pending')) {
-                 node.dataset.nsfwClassification = "pending"; // Ensure pending state for CSS
-             }
+            if (node.getAttribute('src') && (!node.dataset.nsfwClassification || node.dataset.nsfwClassification === 'pending')) {
+                node.dataset.nsfwClassification = "pending"; // Ensure pending state for CSS
+            }
             // Request classification if ready, otherwise setup listeners
             if (node.complete && node.naturalWidth > 0 && node.naturalHeight > 0) {
                 requestClassification(node);
@@ -118,18 +130,18 @@
                     cleanupListeners();
                     if (node.naturalWidth > 0 && node.naturalHeight > 0) {
                         requestClassification(node);
-                    } else { node.dataset.nsfwClassification = 'zero-dimensions'; processingItems.delete(node.getAttribute('src')||''); }
+                    } else { node.dataset.nsfwClassification = 'zero-dimensions'; processingItems.delete(node.getAttribute('src') || ''); }
                 };
                 const onError = () => {
                     cleanupListeners();
                     console.warn(`CS: Image load error: ${node.src?.substring(0, 100)}`);
                     node.dataset.nsfwClassification = 'native-load-error'; // Reveal on error
-                    processingItems.delete(node.getAttribute('src')||'');
+                    processingItems.delete(node.getAttribute('src') || '');
                 };
-                 const cleanupListeners = () => {
+                const cleanupListeners = () => {
                     node.removeEventListener('load', onLoad);
                     node.removeEventListener('error', onError);
-                 };
+                };
                 node.addEventListener('load', onLoad);
                 node.addEventListener('error', onError);
             } else if (node.getAttribute('src')) { // Is complete but zero dimensions
@@ -185,35 +197,41 @@
             observer = null;
             console.log("CS: Observer stopped.");
         }
-        // Revert styles by removing the data attribute, allowing natural display
-        console.log("CS: Removing classification attributes to revert styles...");
+        // Remove body class to deactivate CSS rules
+        setFilterActiveStyles(false);
+        // Revert styles by removing the data attribute
+        console.log("CS: Removing classification attributes...");
         document.querySelectorAll('[data-nsfw-classification]').forEach(el => {
             el.removeAttribute('data-nsfw-classification');
             el.removeAttribute('data-nsfw-original-src');
-            // Add cleanup for other data attributes if used (e.g., data-nsfw-processed)
         });
         processingItems.clear();
         console.log("CS: Filtering stopped, attributes removed.");
-    } // End stopObserver
+    }
 
     // --- Initialization and Message Handling (Simplified) ---
     async function initialize() {
         chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             console.log(`CS: Received message: ${message?.type}`);
-             if (message.type === 'START_FILTERING') {
-                 isFilterGloballyActive = true;
-                 // Inject initial hide CSS dynamically if not using manifest injection? Less reliable.
-                 startObserver(); // Start processing
-                 sendResponse({ status: 'started' });
-             } else if (message.type === 'STOP_FILTERING') {
-                 isFilterGloballyActive = false;
-                 stopObserver(); // Stop processing and revert styles
-                 sendResponse({ status: 'stopped' });
-             }
-             return false;
+            if (message.type === 'START_FILTERING') {
+                isFilterGloballyActive = true;
+                setFilterActiveStyles(true); // Activate CSS rules
+                startObserver(); // Start processing
+                sendResponse({ status: 'started' });
+            } else if (message.type === 'STOP_FILTERING') {
+                isFilterGloballyActive = false;
+                // stopObserver() already calls setFilterActiveStyles(false)
+                stopObserver(); // Stop processing and deactivate CSS/revert attributes
+                sendResponse({ status: 'stopped' });
+            }
+            return false;
         });
         console.log("CS: Initialization complete. Listening.");
-        // No need to send CONTENT_SCRIPT_READY immediately if BG doesn't rely on it before sending START
+
+        // Optional: Check initial state on load?
+        // If the filter might be active *before* the first START_FILTERING message arrives
+        // (e.g., due to page reload while filter was on), you might need an initial check.
+        // However, the background script usually sends START_FILTERING on page load if needed.
     }
 
     initialize();
