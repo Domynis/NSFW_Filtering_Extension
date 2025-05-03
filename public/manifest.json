@@ -20,6 +20,31 @@
     "host_permissions": [
         "<all_urls>"
     ],
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>",
+                "file://*/*"
+            ],
+            "css": [
+                "initial_hide.css"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "<all_urls>",
+                "file://*/*"
+            ],
+            "css": [
+                "initial_hide.css"
+            ],
+            "run_at": "document_start"
+        }
+    ],
     "web_accessible_resources": [
         {
             "resources": [

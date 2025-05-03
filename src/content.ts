@@ -1,299 +1,258 @@
+// content.ts
+
 (async () => {
-    // Prevent multiple executions if injected multiple times
-    if ((window as any).nsfwFilterInitialized) {
-        console.log("CS: Filter already initialized, skipping.");
-        return;
-    }
+    // Initialization guard
+    if ((window as any).nsfwFilterInitialized) return;
     (window as any).nsfwFilterInitialized = true;
-    console.log("CS: Initializing NSFW Filter Content Script...");
+    console.log("CS: Initializing NSFW Filter Content Script (Hide First)...");
 
-    let observer: MutationObserver | null = null; // MutationObserver instance
-    let isFilterGloballyActive = false; // Track state received from background
+    let observer: MutationObserver | null = null;
+    let isFilterGloballyActive = false; // Tracks internal state if needed
+    // let didInitialCheckRun = false; // Prevent race conditions
 
-    // Store original styles { element: { property: value } }
-    const modifiedImages = new Map<HTMLImageElement, { filter: string; opacity: string }>();
-    const processingImages = new Set<string>(); // Track image srcs currently being processed
+    // --- State Tracking ---
+    const processingItems = new Set<string>();
+    const BODY_CLASS_DISABLED = 'nsfw-filter-disabled';
 
-    async function requestClassificationAndStyle(imgElement: HTMLImageElement): Promise<void> {
-        // 1. Pre-checks (Simplified)
-        if (!isFilterGloballyActive) return; // Only check global filter state
+    // --- Function to apply disabled state ---
+    function setFilterDisabledState(isDisabled: boolean) {
+        if (isDisabled) {
+            document.body.classList.add(BODY_CLASS_DISABLED);
+            console.log("CS: Filter is OFF. Added body class:", BODY_CLASS_DISABLED);
+        } else {
+            document.body.classList.remove(BODY_CLASS_DISABLED);
+            console.log("CS: Filter is ON (or state checked). Removed body class:", BODY_CLASS_DISABLED);
+        }
+    }
+
+    // --- Classification Request ---
+    async function requestClassification(imgElement: HTMLImageElement): Promise<void> {
+        if (!isFilterGloballyActive) return;
 
         const originalSrc = imgElement.getAttribute('src');
-        if (!originalSrc) return;
-        if (processingImages.has(originalSrc)) return;
+        if (!originalSrc || processingItems.has(originalSrc)) return; // Check processing
 
-        // Check if *already classified by background* (new dataset attribute maybe?)
-        if (imgElement.dataset.nsfwBgClassified && imgElement.dataset.nsfwOriginalSrc === originalSrc) {
-            // console.log(`CS: Skipping already classified image by BG: ${originalSrc.substring(0,100)}`);
+        // Check if classification is already final (set by CSS or previous run)
+        if (imgElement.dataset.nsfwClassification && imgElement.dataset.nsfwClassification !== "pending") {
             return;
         }
 
         console.log(`CS: Requesting classification for: ${originalSrc.substring(0, 100)}`);
-        processingImages.add(originalSrc); // Mark as processing *before* async fetch/classify
-        imgElement.dataset.nsfwOriginalSrc = originalSrc;
+        processingItems.add(originalSrc);
+        imgElement.dataset.nsfwOriginalSrc = originalSrc; // Keep original src reference
+        imgElement.dataset.nsfwClassification = "pending"; // Mark as pending for CSS
 
-        // 2. Get Image Data URL (Using existing logic, including background fetch if needed)
+        // --- Get Image Data URL --- (Keep existing logic)
         let imageDataSource: string | null = null;
         let fetchError: string | null = null;
         const isLocalPathFlag = originalSrc.startsWith('./') || originalSrc.startsWith('../') || originalSrc.startsWith('/');
         let fetchUrl = originalSrc;
 
         if (originalSrc.startsWith('data:image')) {
-            console.log(`CS: Using existing data URL: ${originalSrc.substring(0, 100)}`);
             imageDataSource = originalSrc;
         } else if (isLocalPathFlag || originalSrc.startsWith('http:') || originalSrc.startsWith('https:')) {
             if (isLocalPathFlag) {
-                try {
-                    fetchUrl = new URL(originalSrc, document.baseURI).href;
-                    console.log(`CS: Converting relative path "${originalSrc}" to absolute URL: ${fetchUrl}`);
-                } catch (e) {
-                    fetchError = `Invalid relative URL: ${originalSrc}`;
-                    console.error(`CS: ${fetchError}`);
-                    processingImages.delete(originalSrc);
-                    return; // Cannot proceed
-                }
+                try { fetchUrl = new URL(originalSrc, document.baseURI).href; }
+                catch (e) { fetchError = `Invalid relative URL: ${originalSrc}`; console.error(fetchError); processingItems.delete(originalSrc); imgElement.dataset.nsfwClassification = "fetch-error"; return; }
             }
-
             console.log(`CS: Requesting data URL via background for URL: ${fetchUrl.substring(0, 100)}`);
             try {
-                const response = await chrome.runtime.sendMessage({
-                    type: 'FETCH_IMAGE_DATAURL',
-                    url: fetchUrl,
-                    isLocalPath: isLocalPathFlag // Pass flag if needed by BG fetcher
-                });
+                const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_DATAURL', url: fetchUrl, isLocalPath: isLocalPathFlag });
                 if (response?.status === 'success' && response.dataUrl) {
-                    console.log(`CS: Received data URL for: ${originalSrc.substring(0, 100)}`);
                     imageDataSource = response.dataUrl;
-                } else {
-                    fetchError = `Failed to get data URL: ${response?.message || 'Unknown background error'}`;
-                    console.error(`CS: ${fetchError} for ${originalSrc}`);
-                }
-            } catch (error: any) {
-                fetchError = `Error communicating with background for fetch: ${error.message}`;
-                console.error(`CS: ${fetchError} for ${originalSrc}`);
-            }
+                } else { fetchError = `Failed to get data URL: ${response?.message || 'Unknown BG error'}`; console.error(`CS: ${fetchError} for ${originalSrc}`); }
+            } catch (error: any) { fetchError = `Error communicating with BG for fetch: ${error.message}`; console.error(`CS: ${fetchError} for ${originalSrc}`); }
         } else {
             console.log(`CS: Skipping image with non-fetchable src: ${originalSrc.substring(0, 100)}`);
-            processingImages.delete(originalSrc); // Unmark processing
+            processingItems.delete(originalSrc);
+            imgElement.dataset.nsfwClassification = "fetch-error"; // Mark as error to reveal
             return;
         }
 
-        // 3. If Data Source Acquired, Send to Background for Classification
+        // --- Send for Classification ---
         if (imageDataSource) {
-            console.log(`CS: Sending image data to background for classification: ${originalSrc.substring(0, 100)}`);
+            console.log(`CS: Sending image data (src: ${originalSrc.substring(0, 100)}) to background...`);
             try {
                 chrome.runtime.sendMessage(
-                    { type: 'CLASSIFY_IMAGE_DATAURL', imageDataUrl: imageDataSource },
+                    { type: 'CLASSIFY_IMAGE_DATAURL', imageDataUrl: imageDataSource, originalUrl: originalSrc /* Pass original URL for caching */ },
                     (response) => {
-                        // Check if runtime disconnected (e.g., extension reload, error)
+                        processingItems.delete(originalSrc); // Done processing this item
                         if (chrome.runtime.lastError) {
-                            console.error(`CS: Error sending/receiving classification for ${originalSrc.substring(0, 100)}: ${chrome.runtime.lastError.message}`);
-                            imgElement.dataset.nsfwBgClassified = 'comm-error'; // Mark communication error
-                            revertImageStyle(imgElement); // Revert on error
-                            processingImages.delete(originalSrc); // Unmark processing
+                            console.error(`CS: Error receiving classification for ${originalSrc.substring(0, 100)}: ${chrome.runtime.lastError.message}`);
+                            imgElement.dataset.nsfwClassification = "comm-error"; // Set final status for CSS
                             return;
                         }
 
-                        // Handle response from background classification
+                        let finalLabel = "error"; // Default to error
                         if (response?.status === 'success') {
-                            const label = response.label;
-                            console.log(`CS: Received classification for ${originalSrc.substring(0, 100)}: ${label}`);
-                            imgElement.dataset.nsfwBgClassified = label; // Store classification result
-
-                            // Apply style based on label received from background
-                            if (['porn', 'sexy', 'hentai'].includes(label)) {
-                                applyNsfwStyle(imgElement);
-                            } else {
-                                revertImageStyle(imgElement);
-                            }
+                            finalLabel = response.label || "unknown";
+                            console.log(`CS: Received classification for ${originalSrc.substring(0, 100)}: ${finalLabel}`);
                         } else {
+                            finalLabel = response?.message?.startsWith('error:') ? response.message.replace('error: ', '') : "bg-error";
                             console.error(`CS: Background classification failed for ${originalSrc.substring(0, 100)}: ${response?.message || 'Unknown error'}`);
-                            imgElement.dataset.nsfwBgClassified = 'bg-error'; // Mark background error
-                            revertImageStyle(imgElement); // Revert on error
                         }
-                        processingImages.delete(originalSrc); // Unmark processing *after* handling response
+                        // ** SET FINAL STATUS VIA DATA ATTRIBUTE FOR CSS **
+                        imgElement.dataset.nsfwClassification = finalLabel;
                     }
                 );
             } catch (error: any) {
-                // Catch synchronous errors during sendMessage itself (less common)
-                console.error(`CS: Synchronous error sending classification message for ${originalSrc.substring(0, 100)}: ${error.message}`);
-                imgElement.dataset.nsfwBgClassified = 'send-error'; // Mark send error
-                revertImageStyle(imgElement); // Revert on error
-                processingImages.delete(originalSrc); // Unmark processing
+                console.error(`CS: Sync error sending classification msg for ${originalSrc.substring(0, 100)}: ${error.message}`);
+                imgElement.dataset.nsfwClassification = "send-error"; // Set final status
+                processingItems.delete(originalSrc);
             }
         } else {
-            // Handle case where data URL fetch failed
-            console.log(`CS: No image data source, skipping classification request for ${originalSrc.substring(0, 100)}.`);
-            imgElement.dataset.nsfwBgClassified = 'fetch-error'; // Reuse fetch-error status
-            revertImageStyle(imgElement); // Ensure reverted if fetch failed
-            processingImages.delete(originalSrc); // Unmark processing
+            // Handle data URL fetch failure
+            console.log(`CS: No image data source for ${originalSrc.substring(0, 100)}.`);
+            imgElement.dataset.nsfwClassification = "fetch-error"; // Set final status
+            processingItems.delete(originalSrc);
         }
     }
 
-    // --- DOM Manipulation & Styling ---
-    function applyNsfwStyle(imgElement: HTMLImageElement) {
-        // Store original style only if not already stored/modified
-        if (!modifiedImages.has(imgElement)) {
-            modifiedImages.set(imgElement, {
-                filter: imgElement.style.filter || '',
-                opacity: imgElement.style.opacity || '',
-            });
-            // Apply NSFW style
-            imgElement.style.filter = 'blur(20px)';
-            imgElement.style.opacity = '0.1';
-            console.log(`CS: Applied NSFW style to: ${imgElement.src?.substring(0, 100)}`);
-        } else {
-            // Already styled, ensure it stays styled (e.g., if classified again)
-            imgElement.style.filter = 'blur(20px)';
-            imgElement.style.opacity = '0.1';
-        }
-    }
-
-    function revertImageStyle(imgElement: HTMLImageElement) {
-        if (modifiedImages.has(imgElement)) {
-            const originalStyle = modifiedImages.get(imgElement)!; // Assert non-null
-            imgElement.style.filter = originalStyle.filter;
-            imgElement.style.opacity = originalStyle.opacity;
-            modifiedImages.delete(imgElement); // Remove from map once reverted
-            console.log(`CS: Reverted style for: ${imgElement.src?.substring(0, 100)}`);
-        }
-        // Don't remove nsfwClassified dataset here, let it persist until src changes or deactivated
-    }
-
+    // --- Node Processing (Simplified) ---
     function processNode(node: Node) {
-        if (!isFilterGloballyActive) return; // Check global state
+        if (document.body.classList.contains(BODY_CLASS_DISABLED)) return;
 
         if (node instanceof HTMLImageElement) {
-            // Check if image is potentially visible and has dimensions before classifying
+            // Set initial pending state if src exists and not already classified
+            if (node.getAttribute('src') && (!node.dataset.nsfwClassification || node.dataset.nsfwClassification === 'pending')) {
+                node.dataset.nsfwClassification = "pending"; // Mark for CSS hiding
+            }
+            // Request classification if ready, otherwise setup listeners
             if (node.complete && node.naturalWidth > 0 && node.naturalHeight > 0) {
-                requestClassificationAndStyle(node);
-            } else if (!node.complete) { // If not loaded, attach listeners
+                requestClassification(node);
+            } else if (!node.complete && node.getAttribute('src')) {
                 const onLoad = () => {
-                    // Check dimensions again after load
+                    cleanupListeners();
                     if (node.naturalWidth > 0 && node.naturalHeight > 0) {
-                        requestClassificationAndStyle(node);
-                    } else {
-                        console.log(`CS: Image loaded but has zero dimensions: ${node.src?.substring(0, 100)}`);
-                        node.dataset.nsfwClassified = 'zero-dimensions';
-                    }
-                    node.removeEventListener('load', onLoad);
-                    node.removeEventListener('error', onError);
+                        requestClassification(node);
+                    } else { node.dataset.nsfwClassification = 'zero-dimensions'; processingItems.delete(node.getAttribute('src') || ''); }
                 };
                 const onError = () => {
-                    console.warn(`CS: Image failed to load natively: ${node.src?.substring(0, 100)}`);
-                    node.dataset.nsfwClassified = 'native-load-error';
+                    cleanupListeners();
+                    console.warn(`CS: Image load error: ${node.src?.substring(0, 100)}`);
+                    node.dataset.nsfwClassification = 'native-load-error'; // Reveal on error
+                    processingItems.delete(node.getAttribute('src') || '');
+                };
+                const cleanupListeners = () => {
                     node.removeEventListener('load', onLoad);
                     node.removeEventListener('error', onError);
                 };
                 node.addEventListener('load', onLoad);
                 node.addEventListener('error', onError);
-            } else {
-                // Is complete but has zero dimensions
-                console.log(`CS: Image complete but zero dimensions on scan: ${node.src?.substring(0, 100)}`);
-                node.dataset.nsfwClassified = 'zero-dimensions';
+            } else if (node.getAttribute('src')) { // Is complete but zero dimensions
+                node.dataset.nsfwClassification = 'zero-dimensions';
             }
         } else if (node instanceof Element && node.querySelectorAll) {
-            // Check for images within the added/mutated element subtree
+            // Recursively check children
             node.querySelectorAll('img').forEach(img => processNode(img));
+            // Add video/background processing back here if needed, applying similar logic
+            // e.g., node.querySelectorAll('video').forEach(vid => processVideoNode(vid));
+            // e.g., node.querySelectorAll('*').forEach(el => processBackgroundStyleNode(el));
         }
-    }
+    } // End processNode
 
-    // --- Mutation Observer ---
+    // --- Mutation Observer (Simplified Attribute Handling) ---
     function startObserver() {
-        if (observer) {
-            console.log("CS: Observer already running.");
-            return;
-        }
-
-        console.log("CS: Starting MutationObserver...");
+        if (observer) return;
+        console.log("CS: Starting MutationObserver (Hide First)...");
         observer = new MutationObserver((mutations) => {
-            if (!isFilterGloballyActive) return; // Check state during callback
-            console.log(`CS: MutationObserver detected ${mutations.length} mutations.`); // Debugging frequency
+            if (!isFilterGloballyActive) return;
             for (const mutation of mutations) {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach(node => processNode(node));
-                    // Note: We don't explicitly handle removedNodes for reverting style,
-                    // as the `modifiedImages` map keeps track. Reverting happens on STOP.
                 } else if (mutation.type === 'attributes') {
                     if (mutation.attributeName === 'src' && mutation.target instanceof HTMLImageElement) {
-                        console.log(`CS: Image src changed for: ${mutation.target.dataset.nsfwOriginalSrc?.substring(0, 100)} -> ${mutation.target.src?.substring(0, 100)}`);
-                        // Reset classification status and re-process if src changes
-                        delete mutation.target.dataset.nsfwClassified;
-                        revertImageStyle(mutation.target); // Revert any old styling first
-                        processNode(mutation.target);
+                        const targetElement = mutation.target;
+                        const oldSrc = mutation.oldValue;
+                        console.log(`CS Obsrv: Image src changed:`, targetElement);
+                        if (oldSrc) processingItems.delete(oldSrc); // Clear old item from processing
+                        // Reset status attribute to trigger reprocessing/re-hiding by CSS
+                        targetElement.removeAttribute('data-nsfw-classification');
+                        targetElement.removeAttribute('data-nsfw-original-src');
+                        // Re-run processing logic for the node
+                        processNode(targetElement);
                     }
-                    // Could also observe 'style' or 'class' if needed, but might be too noisy
+                    // Add similar handling for video src/currentSrc if needed
+                    // Add handling for style/class changes if background images are processed
                 }
             }
         });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src' /*, 'style', 'class', 'currentSrc' */], attributeOldValue: true });
 
-        observer.observe(document.body, {
-            childList: true, // Observe additions/removals of nodes
-            subtree: true,   // Observe descendants
-            attributes: true, // Observe attribute changes
-            attributeFilter: ['src'], // Focus on src changes for images
-            // attributeOldValue: false, // Don't need old value for src check
-            // characterData: false,     // Don't need text changes
-        });
-
-        // Initial scan of existing images on the page
-        console.log("CS: Performing initial image scan...");
+        console.log("CS: Performing initial image scan (Hide First)...");
         document.querySelectorAll('img').forEach(img => processNode(img));
-        console.log("CS: Initial image scan complete. Observer is active.");
-    }
+        // Add initial scan for video/backgrounds if re-added
+        console.log("CS: Initial scan complete.");
+    } // End startObserver
 
+    // --- Stop Observer (Simplified) ---
     function stopObserver() {
         if (observer) {
-            console.log("CS: Stopping MutationObserver...");
             observer.disconnect();
             observer = null;
-        } else {
-            console.log("CS: Observer not running, no need to stop.");
+            console.log("CS: Observer stopped.");
         }
-        // Revert styles for all images modified by the filter
-        console.log("CS: Reverting styles for all modified images...");
-        modifiedImages.forEach((style, imgElement) => {
-            imgElement.style.filter = style.filter;
-            imgElement.style.opacity = style.opacity;
-            // Optionally remove dataset markers? Or leave them? Let's remove classification status.
-            delete imgElement.dataset.nsfwClassified;
-            delete imgElement.dataset.nsfwOriginalSrc;
+        // Add disabled class to reveal everything via CSS
+        setFilterDisabledState(true);
+        // Remove specific classification attributes (optional cleanup)
+        console.log("CS: Removing classification attributes...");
+        document.querySelectorAll('[data-nsfw-classification]').forEach(el => {
+            el.removeAttribute('data-nsfw-classification');
+            el.removeAttribute('data-nsfw-original-src');
         });
-        modifiedImages.clear(); // Clear the map
-        processingImages.clear(); // Clear processing set
-        console.log("CS: Styles reverted. Filtering stopped.");
+        processingItems.clear();
+        console.log("CS: Filtering stopped, reveal class added.");
     }
 
-    // --- Initialization and Message Handling ---
+    // --- Initialization and Message Handling (Simplified) ---
     async function initialize() {
+        console.log("CS: Running initial state check...");
         try {
-            // Listen for messages from background script AFTER TF/Model attempts
-            chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-                if (message.type === 'START_FILTERING') {
-                    console.log("CS: Received START_FILTERING message.");
-                    isFilterGloballyActive = true;
-                    startObserver();
-                    sendResponse({ status: 'started' });
-                } else if (message.type === 'STOP_FILTERING') {
-                    console.log("CS: Received STOP_FILTERING message.");
-                    isFilterGloballyActive = false;
-                    stopObserver();
-                    sendResponse({ status: 'stopped' });
-                }
-                return false;
-            });
+            // Check storage immediately on load
+            const data = await chrome.storage.local.get('isFilterActive');
+            const isActive = !!data.isFilterActive;
+            isFilterGloballyActive = isActive; // Update internal state tracker
+            // didInitialCheckRun = true;
 
-            console.log("CS: Initialization complete. Listening for messages.");
-            // Optional: Send ready message to background
-            // chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY' });
-
+            if (!isActive) {
+                // If filter is OFF, add disabled class and DO NOT proceed
+                setFilterDisabledState(true);
+                console.log("CS: Initial state is OFF. Aborting observer setup.");
+                // Do not set up message listener if already decided state is off? Or keep it? Keep it for toggling ON later.
+            } else {
+                // If filter is ON, ensure disabled class is removed and start observer immediately
+                setFilterDisabledState(false);
+                console.log("CS: Initial state is ON. Starting observer.");
+                startObserver(); // Start observing/processing right away
+            }
         } catch (error) {
-            console.error("CS: CRITICAL Initialization failed:", error);
-            // If TFJS fails to load, the script cannot function
+            console.error("CS: Error getting initial filter state:", error);
+            // Assume filter is off on error? Or proceed cautiously? Let's assume off.
+            setFilterDisabledState(true);
+            //  didInitialCheckRun = true; // Mark check as done even on error
         }
+
+        // Set up message listener regardless of initial state, to handle future toggles
+        chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+            console.log(`CS: Received message: ${message?.type}`);
+
+            if (message.type === 'START_FILTERING') {
+                isFilterGloballyActive = true;
+                setFilterDisabledState(false); // Ensure disabled class is removed
+                // Only start observer if initial check didn't already start it
+                if (!observer) startObserver();
+                sendResponse({ status: 'started' });
+            } else if (message.type === 'STOP_FILTERING') {
+                isFilterGloballyActive = false;
+                stopObserver(); // Handles setting disabled class and stopping observer
+                sendResponse({ status: 'stopped' });
+            }
+            return false;
+        });
+
+        console.log("CS: Initialization complete. Message listener attached.");
     }
 
-    // --- Run Initialization ---
     initialize();
 
-})(); // End of IIFE
+})(); // End IIFE
