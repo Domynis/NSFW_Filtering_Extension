@@ -23,7 +23,21 @@
     "content_scripts": [
         {
             "matches": [
-                "<all_urls>"
+                "<all_urls>",
+                "file://*/*"
+            ],
+            "css": [
+                "initial_hide.css"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "<all_urls>",
+                "file://*/*"
             ],
             "css": [
                 "initial_hide.css"

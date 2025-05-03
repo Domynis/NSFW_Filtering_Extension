@@ -23,24 +23,24 @@ const toggleFilter = () => {
   const newState = !isFilterActive.value;
   isLoading.value = true; // Show loading until state confirmed
   chrome.runtime.sendMessage({ type: 'TOGGLE_FILTER', active: newState }, (response) => {
-     if (chrome.runtime.lastError) {
-        console.error("Error sending toggle message:", chrome.runtime.lastError.message);
-        // Revert UI optimistic update or show error
-        isLoading.value = false;
-        // Optionally call syncState again to be sure
-        syncState();
-        return;
-     }
+    if (chrome.runtime.lastError) {
+      console.error("Error sending toggle message:", chrome.runtime.lastError.message);
+      // Revert UI optimistic update or show error
+      isLoading.value = false;
+      // Optionally call syncState again to be sure
+      syncState();
+      return;
+    }
     if (response?.status === 'success') {
       console.log('Toggle message acknowledged by background.');
       // Background script should update storage, rely on listener or syncState for UI update
       // isFilterActive.value = newState; // Optimistic update (optional)
     } else {
-        console.error("Background script failed to toggle state.");
-        // Revert UI or show error
+      console.error("Background script failed to toggle state.");
+      // Revert UI or show error
     }
-     // Let the storage listener update the UI state definitively
-     // isLoading.value = false; // Handled by storage listener ideally
+    // Let the storage listener update the UI state definitively
+    // isLoading.value = false; // Handled by storage listener ideally
   });
 };
 
@@ -49,7 +49,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.isFilterActive) {
     console.log('Popup received storage change:', changes.isFilterActive.newValue);
     isFilterActive.value = !!changes.isFilterActive.newValue;
-     isLoading.value = false; // State confirmed
+    isLoading.value = false; // State confirmed
   }
 });
 
@@ -69,6 +69,15 @@ onMounted(syncState);
 </template>
 
 <style scoped>
-.card { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>

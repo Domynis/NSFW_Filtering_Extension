@@ -1,52 +1,64 @@
-      
 /* public/initial_hide.css */
 
-/* Add a parent selector 'body.nsfw-filter-active' to all rules
-   so they only apply when the content script adds this class */
-
-/* Initial Pending/Hide State */
-body.nsfw-filter-active img[src]:not([data-nsfw-classification]), /* Initially has no attribute */
-body.nsfw-filter-active img[src][data-nsfw-classification="pending"],
-/* body.nsfw-filter-active video[src]:not([data-nsfw-classification]), */
-/* body.nsfw-filter-active video[src][data-nsfw-classification="pending"], */
-body.nsfw-filter-active [data-nsfw-bg-check="pending"]:not([data-nsfw-classification]) /* Add if using bg check */
-{
-  opacity: 0.05 !important;
-  /* filter: blur(1px); */
-  /* transition: opacity 0.2s ease-in-out; */
-}
-
-/* NSFW State */
-body.nsfw-filter-active [data-nsfw-classification="porn"],
-body.nsfw-filter-active [data-nsfw-classification="sexy"],
-body.nsfw-filter-active [data-nsfw-classification="hentai"]
-{
+/*
+ * DEFAULT HIDE STATE:
+ * Applied immediately by manifest injection BEFORE filter state is known.
+ * Targets elements that *don't* have a final classification state yet.
+ * We'll use data-nsfw-classification="pending" or the absence of the attribute.
+*/
+img[src]:not([data-nsfw-classification="safe"]):not([data-nsfw-classification="drawing"]):not([data-nsfw-classification="neutral"]):not([data-nsfw-classification="unknown"]):not([data-nsfw-classification^="error"]):not([data-nsfw-classification^="bg-error"]):not([data-nsfw-classification^="comm-error"]):not([data-nsfw-classification^="send-error"]):not([data-nsfw-classification^="fetch-error"]):not([data-nsfw-classification^="capture-error"]):not([data-nsfw-classification^="canvas-error"]):not([data-nsfw-classification^="capture-nodata"]):not([data-nsfw-classification^="load-error"]):not([data-nsfw-classification^="native-load-error"]):not([data-nsfw-classification^="zero-dimensions"]):not([data-nsfw-classification="porn"]):not([data-nsfw-classification="sexy"]):not([data-nsfw-classification="hentai"]),
+video[src]:not([data-nsfw-classification="safe"]),
+[data-nsfw-bg-check="pending"]:not([data-nsfw-classification]) {
     opacity: 0.1 !important;
     filter: blur(20px) !important;
-    transition: none;
+    transition: opacity 0.2s ease-in-out !important;
+    /* Allow transition for reveal */
 }
 
-/* Safe/Error/Revealed State - LIST ALL NON-NSFW and ERROR labels explicitly */
-body.nsfw-filter-active [data-nsfw-classification="safe"],
-body.nsfw-filter-active [data-nsfw-classification="drawing"],
-body.nsfw-filter-active [data-nsfw-classification="neutral"],
-body.nsfw-filter-active [data-nsfw-classification="unknown"],
-body.nsfw-filter-active [data-nsfw-classification^="error"], /* Catches general errors */
-body.nsfw-filter-active [data-nsfw-classification^="bg-error"],
-body.nsfw-filter-active [data-nsfw-classification^="comm-error"],
-body.nsfw-filter-active [data-nsfw-classification^="send-error"],
-body.nsfw-filter-active [data-nsfw-classification^="fetch-error"],
-body.nsfw-filter-active [data-nsfw-classification^="capture-error"],
-body.nsfw-filter-active [data-nsfw-classification^="canvas-error"],
-body.nsfw-filter-active [data-nsfw-classification^="capture-nodata"],
-body.nsfw-filter-active [data-nsfw-classification^="load-error"],
-body.nsfw-filter-active [data-nsfw-classification^="native-load-error"],
-body.nsfw-filter-active [data-nsfw-classification^="zero-dimensions"]
- {
+
+/* NSFW State (Only applies when classification is set) */
+[data-nsfw-classification="porn"],
+[data-nsfw-classification="sexy"],
+[data-nsfw-classification="hentai"] {
+    opacity: 0.1 !important;
+    filter: blur(20px) !important;
+    transition: none !important;
+    /* No transition for NSFW */
+}
+
+
+/* Safe/Error/Revealed State (Only applies when classification is set) */
+[data-nsfw-classification="safe"],
+[data-nsfw-classification="drawing"],
+[data-nsfw-classification="neutral"],
+[data-nsfw-classification="unknown"],
+[data-nsfw-classification^="error"],
+/* Catches general errors */
+[data-nsfw-classification^="bg-error"],
+[data-nsfw-classification^="comm-error"],
+[data-nsfw-classification^="send-error"],
+[data-nsfw-classification^="fetch-error"],
+[data-nsfw-classification^="capture-error"],
+[data-nsfw-classification^="canvas-error"],
+[data-nsfw-classification^="capture-nodata"],
+[data-nsfw-classification^="load-error"],
+[data-nsfw-classification^="native-load-error"],
+[data-nsfw-classification^="zero-dimensions"] {
     opacity: 1 !important;
+    /* Reveal */
     filter: none !important;
 }
 
-/* --- IMPORTANT: No rules without 'body.nsfw-filter-active' --- */
 
-    
+/*
+ * OVERRIDE FOR DISABLED FILTER:
+ * If the body has the 'nsfw-filter-disabled' class, reveal EVERYTHING
+ * regardless of its classification attribute state.
+*/
+body.nsfw-filter-disabled img[src]:not([data-nsfw-classification="safe"]):not([data-nsfw-classification="drawing"]):not([data-nsfw-classification="neutral"]):not([data-nsfw-classification="unknown"]):not([data-nsfw-classification^="error"]):not([data-nsfw-classification^="bg-error"]):not([data-nsfw-classification^="comm-error"]):not([data-nsfw-classification^="send-error"]):not([data-nsfw-classification^="fetch-error"]):not([data-nsfw-classification^="capture-error"]):not([data-nsfw-classification^="canvas-error"]):not([data-nsfw-classification^="capture-nodata"]):not([data-nsfw-classification^="load-error"]):not([data-nsfw-classification^="native-load-error"]):not([data-nsfw-classification^="zero-dimensions"]):not([data-nsfw-classification="porn"]):not([data-nsfw-classification="sexy"]):not([data-nsfw-classification="hentai"]),
+body.nsfw-filter-disabled video[src]:not([data-nsfw-classification="safe"]),
+body.nsfw-filter-disabled [data-nsfw-bg-check="pending"]:not([data-nsfw-classification]) {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+}

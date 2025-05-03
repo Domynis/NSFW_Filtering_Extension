@@ -7,22 +7,21 @@
     console.log("CS: Initializing NSFW Filter Content Script (Hide First)...");
 
     let observer: MutationObserver | null = null;
-    let isFilterGloballyActive = false;
+    let isFilterGloballyActive = false; // Tracks internal state if needed
+    // let didInitialCheckRun = false; // Prevent race conditions
 
     // --- State Tracking ---
-    // No need to store styles anymore, CSS handles it via data attributes
-    // const modifiedImages = new Map<HTMLImageElement, { filter: string; opacity: string }>();
-    const processingItems = new Set<string>(); // Use originalSrc for images/bg, unique key for video
+    const processingItems = new Set<string>();
+    const BODY_CLASS_DISABLED = 'nsfw-filter-disabled';
 
-    // --- Body Class Management ---
-    const BODY_CLASS_ACTIVE = 'nsfw-filter-active';
-    function setFilterActiveStyles(isActive: boolean) {
-        if (isActive) {
-            document.body.classList.add(BODY_CLASS_ACTIVE);
-            console.log("CS: Added body class:", BODY_CLASS_ACTIVE);
+    // --- Function to apply disabled state ---
+    function setFilterDisabledState(isDisabled: boolean) {
+        if (isDisabled) {
+            document.body.classList.add(BODY_CLASS_DISABLED);
+            console.log("CS: Filter is OFF. Added body class:", BODY_CLASS_DISABLED);
         } else {
-            document.body.classList.remove(BODY_CLASS_ACTIVE);
-            console.log("CS: Removed body class:", BODY_CLASS_ACTIVE);
+            document.body.classList.remove(BODY_CLASS_DISABLED);
+            console.log("CS: Filter is ON (or state checked). Removed body class:", BODY_CLASS_DISABLED);
         }
     }
 
@@ -107,20 +106,16 @@
             imgElement.dataset.nsfwClassification = "fetch-error"; // Set final status
             processingItems.delete(originalSrc);
         }
-    } // End requestClassification
-
-    // --- Remove Styling Functions (CSS Handles This) ---
-    // function applyNsfwStyle(...) { /* DELETE */ }
-    // function revertImageStyle(...) { /* DELETE */ }
+    }
 
     // --- Node Processing (Simplified) ---
     function processNode(node: Node) {
-        if (!isFilterGloballyActive) return;
+        if (document.body.classList.contains(BODY_CLASS_DISABLED)) return;
 
         if (node instanceof HTMLImageElement) {
             // Set initial pending state if src exists and not already classified
             if (node.getAttribute('src') && (!node.dataset.nsfwClassification || node.dataset.nsfwClassification === 'pending')) {
-                node.dataset.nsfwClassification = "pending"; // Ensure pending state for CSS
+                node.dataset.nsfwClassification = "pending"; // Mark for CSS hiding
             }
             // Request classification if ready, otherwise setup listeners
             if (node.complete && node.naturalWidth > 0 && node.naturalHeight > 0) {
@@ -197,41 +192,65 @@
             observer = null;
             console.log("CS: Observer stopped.");
         }
-        // Remove body class to deactivate CSS rules
-        setFilterActiveStyles(false);
-        // Revert styles by removing the data attribute
+        // Add disabled class to reveal everything via CSS
+        setFilterDisabledState(true);
+        // Remove specific classification attributes (optional cleanup)
         console.log("CS: Removing classification attributes...");
         document.querySelectorAll('[data-nsfw-classification]').forEach(el => {
             el.removeAttribute('data-nsfw-classification');
             el.removeAttribute('data-nsfw-original-src');
         });
         processingItems.clear();
-        console.log("CS: Filtering stopped, attributes removed.");
+        console.log("CS: Filtering stopped, reveal class added.");
     }
 
     // --- Initialization and Message Handling (Simplified) ---
     async function initialize() {
+        console.log("CS: Running initial state check...");
+        try {
+            // Check storage immediately on load
+            const data = await chrome.storage.local.get('isFilterActive');
+            const isActive = !!data.isFilterActive;
+            isFilterGloballyActive = isActive; // Update internal state tracker
+            // didInitialCheckRun = true;
+
+            if (!isActive) {
+                // If filter is OFF, add disabled class and DO NOT proceed
+                setFilterDisabledState(true);
+                console.log("CS: Initial state is OFF. Aborting observer setup.");
+                // Do not set up message listener if already decided state is off? Or keep it? Keep it for toggling ON later.
+            } else {
+                // If filter is ON, ensure disabled class is removed and start observer immediately
+                setFilterDisabledState(false);
+                console.log("CS: Initial state is ON. Starting observer.");
+                startObserver(); // Start observing/processing right away
+            }
+        } catch (error) {
+            console.error("CS: Error getting initial filter state:", error);
+            // Assume filter is off on error? Or proceed cautiously? Let's assume off.
+            setFilterDisabledState(true);
+            //  didInitialCheckRun = true; // Mark check as done even on error
+        }
+
+        // Set up message listener regardless of initial state, to handle future toggles
         chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             console.log(`CS: Received message: ${message?.type}`);
+
             if (message.type === 'START_FILTERING') {
                 isFilterGloballyActive = true;
-                setFilterActiveStyles(true); // Activate CSS rules
-                startObserver(); // Start processing
+                setFilterDisabledState(false); // Ensure disabled class is removed
+                // Only start observer if initial check didn't already start it
+                if (!observer) startObserver();
                 sendResponse({ status: 'started' });
             } else if (message.type === 'STOP_FILTERING') {
                 isFilterGloballyActive = false;
-                // stopObserver() already calls setFilterActiveStyles(false)
-                stopObserver(); // Stop processing and deactivate CSS/revert attributes
+                stopObserver(); // Handles setting disabled class and stopping observer
                 sendResponse({ status: 'stopped' });
             }
             return false;
         });
-        console.log("CS: Initialization complete. Listening.");
 
-        // Optional: Check initial state on load?
-        // If the filter might be active *before* the first START_FILTERING message arrives
-        // (e.g., due to page reload while filter was on), you might need an initial check.
-        // However, the background script usually sends START_FILTERING on page load if needed.
+        console.log("CS: Initialization complete. Message listener attached.");
     }
 
     initialize();

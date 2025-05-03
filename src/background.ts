@@ -127,44 +127,19 @@ async function classifyImageData(imageDataUrl: string): Promise<string | null> {
 // --- Content Script Injection/Control ---
 // Injects the content script if needed and sends start/stop messages.
 async function updateContentScriptState(tabId: number, active: boolean): Promise<void> {
-    console.log(`BG: Updating content script state for tab ${tabId} to ${active}`);
+    console.log(`BG: Sending filter state to tab ${tabId}: ${active}`);
     const message = { type: active ? 'START_FILTERING' : 'STOP_FILTERING' };
 
     try {
-        if (active) {
-            // Try injecting first. If it fails because script is already there, catch and just send message.
-            try {
-                console.log(`BG: Injecting content script into tab ${tabId}`);
-                await chrome.scripting.executeScript({
-                    target: { tabId: tabId },
-                    files: ['content.js'], // Ensure this file exists and is compiled JS if needed
-                });
-                // Short delay might sometimes help ensure script is ready before message
-                await new Promise(resolve => setTimeout(resolve, 150));
-            } catch (injectionError: any) {
-                // Common error if script already injected: "Cannot create item with duplicate id content.ts" or similar
-                // Or "Cannot access contents of url" or "Missing host permission for the tab"
-                if (injectionError.message.includes("duplicate id") || injectionError.message.includes("already injected")) {
-                    console.warn(`BG: Content script likely already injected in tab ${tabId}. Proceeding to send message.`);
-                } else {
-                    // Re-throw other injection errors (permissions etc.)
-                    throw injectionError;
-                }
-            }
-        }
-
-        // Send the start/stop message regardless of injection result (if active=true) or always (if active=false)
-        console.log(`BG: Sending ${message.type} to tab ${tabId}`);
+        // Just send the message, content script is already loaded via manifest
         await chrome.tabs.sendMessage(tabId, message);
-
+        console.log(`BG: Sent ${message.type} to tab ${tabId}`);
     } catch (error: any) {
-        // Handle errors (e.g., no access to page, tab closed, no listener in content script)
+        // Error handling for sendMessage remains the same
         if (error.message.includes("Could not establish connection") || error.message.includes("Receiving end does not exist")) {
-            console.warn(`BG: Could not connect to content script in tab ${tabId} (maybe closed, navigated, or CS failed to load?):`, error.message);
-        } else if (error.message.includes("Cannot access contents of url") || error.message.includes("Missing host permission")) {
-            console.error(`BG: Cannot access tab ${tabId} due to permissions or restricted page.`);
+            console.warn(`BG: Could not send message to content script in tab ${tabId} (maybe closed, navigated, or CS failed to load?):`, error.message);
         } else {
-            console.error(`BG: Error updating content script state for tab ${tabId}:`, error);
+            console.error(`BG: Error sending message to content script for tab ${tabId}:`, error);
         }
     }
 }
@@ -216,12 +191,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log(`BG: Received TOGGLE_FILTER request, target state: ${newState}`);
         setFilterState(newState).then(async () => {
             try {
-                const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                // Ensure tab exists and is not a restricted URL
-                if (activeTab?.id && activeTab.url && !activeTab.url.startsWith('chrome://') && !activeTab.url.startsWith('about:')) {
-                    await updateContentScriptState(activeTab.id, newState);
-                } else {
-                    console.log("BG: No suitable active tab found to update, or URL is restricted.");
+                const tabs = await chrome.tabs.query({
+                    url: ["http://*/*", "https://*/*", "file://*/*"] // Match URLs where CS runs
+                });
+                console.log(`BG: Found ${tabs.length} tabs to update state.`);
+                for (const tab of tabs) {
+                    if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+                        console.log(`BG: Updating tab ${tab.id}`);
+                        await updateContentScriptState(tab.id, newState);
+                    }
                 }
                 sendResponse({ status: 'success' });
             } catch (error: any) {
