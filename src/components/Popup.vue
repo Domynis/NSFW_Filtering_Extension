@@ -101,7 +101,7 @@ onMounted(syncState);
 }
 
 h1 {
-  font-size: 1.5em;
+  font-size: 3em;
   color: #333333;
   margin-top: 0;
   margin-bottom: 0;
