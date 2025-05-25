@@ -33,9 +33,6 @@ async function loadModelInBackground(): Promise<tf.GraphModel | null> {
         try {
             const modelUrl = chrome.runtime.getURL(MODEL_PATH);
             console.log("BG: Resolved model URL:", modelUrl);
-            // Optional: Set backend if needed
-            // await tf.setBackend('cpu');
-            // console.log(`BG: TF backend set to: ${tf.getBackend()}`);
             const loadedModel = await tf.loadGraphModel(modelUrl);
             console.log('BG: Model loaded successfully!');
             modelInstance = loadedModel;
@@ -63,7 +60,7 @@ async function classifyImageData(imageDataUrl: string): Promise<string | null> {
     let outputTensor: tf.Tensor | null = null;
 
     try {
-        const response = await fetch(imageDataUrl); // imageDataUrl should be a data URL or blob URL
+        const response = await fetch(imageDataUrl);
         if (!response.ok) throw new Error("Failed to fetch image data blob");
         const blob = await response.blob();
         if (!blob.type.startsWith('image/')) throw new Error("Blob is not an image type");
@@ -126,7 +123,7 @@ async function fetchImageAsDataUrl(imageUrl: string): Promise<string> {
     console.log(`BG: Fetching image for data URL conversion: ${imageUrl.substring(0, 100)}`);
 
     try {
-        const response = await fetch(imageUrl); // No special options, rely on default fetch behavior
+        const response = await fetch(imageUrl);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status} for ${imageUrl}`);
@@ -178,7 +175,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.error("BG: Error setting filter state in storage:", error);
             sendResponse({ status: 'error', message: error.message });
         });
-        return true; // Indicates asynchronous response
+        return true;
     }
 
     if (message.type === 'FETCH_IMAGE_DATAURL' && message.url) {
@@ -188,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (imageUrl.startsWith('data:image')) {
             console.log(`BG: URL is already a data URL, returning directly: ${imageUrl.substring(0, 60)}...`);
             sendResponse({ status: 'success', dataUrl: imageUrl });
-            return false; // Synchronous response
+            return false;
         }
         if (!imageUrl.startsWith('http:') && !imageUrl.startsWith('https:') && !imageUrl.startsWith('blob:') && !imageUrl.startsWith('chrome-extension:')) {
             console.warn(`BG: Invalid image URL scheme for background fetch: ${imageUrl}`);
@@ -202,7 +199,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .catch(error => {
                 sendResponse({ status: 'error', message: error.message || 'Failed to fetch or convert image' });
             });
-        return true; // Indicates asynchronous response
+        return true;
     }
 
     if (message.type === 'BATCH_FETCH_IMAGE_DATAURLS' && Array.isArray(message.urls)) {
@@ -219,7 +216,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const errorResults = urls.map(url => ({ fetchUrl: url, dataUrl: null, error: 'Batch processing error' }));
             sendResponse({ status: 'error', results: errorResults, message: 'Batch fetch failed catastrophically' });
         });
-        return true; // Indicates asynchronous response
+        return true;
     }
 
     if (message.type === 'CLASSIFY_IMAGE_DATAURL' && message.imageDataUrl) {
@@ -238,12 +235,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 console.error("BG: Unexpected error handling classification request:", error);
                 sendResponse({ status: 'error', message: error.message || 'Internal background error' });
             });
-        return true; // Indicates asynchronous response
+        return true;
     }
 
     if (message.type === 'BATCH_CLASSIFY_IMAGE_DATAURLS' && Array.isArray(message.items)) {
         console.log(`BG: Received BATCH_CLASSIFY_IMAGE_DATAURLS for ${message.items.length} items.`);
-        const items: Array<{imgReqId: string, imageDataUrl: string, originalSrc: string}> = message.items;
+        const items: Array<{ imgReqId: string, imageDataUrl: string, originalSrc: string }> = message.items;
 
         Promise.all(items.map(item =>
             classifyImageData(item.imageDataUrl)
@@ -272,7 +269,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const errorResults = items.map(item => ({ imgReqId: item.imgReqId, originalSrc: item.originalSrc, error: 'Batch classification processing error' }));
             sendResponse({ status: 'error', results: errorResults, message: 'Batch classification failed catastrophically' });
         });
-        return true; // Indicates asynchronous response
+        return true;
     }
 
     if (message.type === 'CONTENT_SCRIPT_READY') {
@@ -280,8 +277,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ status: "ack" });
         return false;
     }
-    // console.log("BG: Received unhandled message:", message);
-    return false; // Default for unhandled messages or synchronous responses
+
+    return false;
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
@@ -302,7 +299,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         await setFilterState(false);
         console.log("BG: Filter set to inactive on first install.");
     }
-    // Pre-load model on install/update
+
     loadModelInBackground().then(() => {
         console.log("BG: Pre-emptive model load attempt finished on install/update.");
     }).catch(error => {
@@ -312,10 +309,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 chrome.runtime.onStartup.addListener(async () => {
     console.log("BG: Browser startup detected.");
-    // Pre-load model on browser startup
-    // Optionally, you could check if the filter is active first:
-    // const isActive = await getFilterState();
-    // if (isActive) { ... }
     loadModelInBackground().then(() => {
         console.log("BG: Pre-emptive model load attempt finished on startup.");
     }).catch(error => {

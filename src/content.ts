@@ -41,7 +41,7 @@
         if (fetchQueue.length === 0) return;
 
         const batchToFetch = [...fetchQueue];
-        fetchQueue = []; // Clear queue for next batch
+        fetchQueue = [];
 
         const urlsToFetch = batchToFetch.map(item => item.fetchUrl);
         console.log(`CS: Processing fetch queue for ${batchToFetch.length} items. URLs:`, urlsToFetch.map(u => u.substring(0, 60)));
@@ -54,7 +54,6 @@
                     correspondingItems.forEach(item => {
                         if (result.dataUrl) {
                             console.log(`CS: Successfully fetched data URL for ${item.originalSrc.substring(0, 60)}`);
-                            // Add to classification queue
                             classifyQueue.push({ imgElement: item.imgElement, imageDataUrl: result.dataUrl, originalSrc: item.originalSrc, imgReqId: item.imgReqId });
                             if (classifyQueue.length >= CLASSIFY_QUEUE_MAX_SIZE) {
                                 processClassifyQueue();
@@ -90,7 +89,7 @@
         if (classifyQueue.length === 0) return;
 
         const batchToClassify = [...classifyQueue];
-        classifyQueue = []; // Clear for next batch
+        classifyQueue = [];
 
         const itemsToClassify = batchToClassify.map(item => ({ imgReqId: item.imgReqId, imageDataUrl: item.imageDataUrl, originalSrc: item.originalSrc }));
         console.log(`CS: Processing classify queue for ${batchToClassify.length} items.`);
@@ -127,7 +126,6 @@
         }
     }
 
-    // This function is called when an image is ready to be processed (e.g., visible, loaded)
     async function stageImageForProcessing(imgElement: HTMLImageElement): Promise<void> {
         if (!isFilterGloballyActive) return;
 
@@ -135,7 +133,7 @@
         if (!originalSrc || processingItems.has(originalSrc)) return;
 
         if (imgElement.dataset.nsfwClassification && imgElement.dataset.nsfwClassification !== "pending") {
-            return; // Already finally classified
+            return;
         }
 
         console.log(`CS: Staging for processing: ${originalSrc.substring(0, 100)}`);
@@ -145,12 +143,9 @@
         const imgReqId = generateImgReqId();
 
         let fetchableUrl = originalSrc;
-        // let needsFetching = true;
         let fetchError = null;
 
         if (originalSrc.startsWith('data:image')) {
-            // needsFetching = false;
-            // Add directly to classification queue
             classifyQueue.push({ imgElement, imageDataUrl: originalSrc, originalSrc, imgReqId });
             if (classifyQueue.length >= CLASSIFY_QUEUE_MAX_SIZE) {
                 processClassifyQueue();
@@ -255,7 +250,7 @@
             if (imageIntersectionObserver) {
                 imageIntersectionObserver.observe(imgNode);
             }
-        } 
+        }
     }
 
     function processDomNode(node: Node) {
@@ -272,7 +267,7 @@
         if (mutationObserver && imageIntersectionObserver) return;
 
         console.log("CS: Starting MutationObserver and IntersectionObserver.");
-        
+
         if (imageIntersectionObserver) imageIntersectionObserver.disconnect();
         imageIntersectionObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -281,9 +276,9 @@
                 }
             });
         }, {
-            root: null, 
+            root: null,
             rootMargin: '0px 0px 250px 0px',
-            threshold: 0.01 
+            threshold: 0.01
         });
 
         if (mutationObserver) mutationObserver.disconnect();
@@ -317,12 +312,12 @@
             imageIntersectionObserver = null;
             console.log("CS: IntersectionObserver stopped.");
         }
-        // Clear any pending timeouts for queues
+
         if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
         fetchTimeoutId = null;
         if (classifyTimeoutId) clearTimeout(classifyTimeoutId);
         classifyTimeoutId = null;
-        // Clear queues and processing items
+
         fetchQueue = [];
         classifyQueue = [];
         processingItems.clear();
@@ -361,7 +356,7 @@
             if (message.type === 'START_FILTERING') {
                 isFilterGloballyActive = true;
                 setFilterDisabledVisualState(false);
-                startObservers(); 
+                startObservers();
                 sendResponse({ status: 'started' });
             } else if (message.type === 'STOP_FILTERING') {
                 isFilterGloballyActive = false;
