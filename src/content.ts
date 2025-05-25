@@ -1,13 +1,29 @@
 (async () => {
     if ((window as any).nsfwFilterInitialized) return;
     (window as any).nsfwFilterInitialized = true;
-    console.log("CS: Initializing NSFW Filter Content Script with Lazy Loading...");
+    console.log("CS: Initializing NSFW Filter Content Script with Batching & Lazy Loading...");
 
     let mutationObserver: MutationObserver | null = null;
     let imageIntersectionObserver: IntersectionObserver | null = null;
     let isFilterGloballyActive = false;
-    const processingItems = new Set<string>(); // Tracks src strings of images currently being fetched/classified
+    const processingItems = new Set<string>();
     const BODY_CLASS_DISABLED = 'nsfw-filter-disabled';
+
+    const FETCH_QUEUE_MAX_SIZE = 20;
+    const FETCH_QUEUE_DEBOUNCE_MS = 200;
+    const CLASSIFY_QUEUE_MAX_SIZE = 10;
+    const CLASSIFY_QUEUE_DEBOUNCE_MS = 200;
+
+    let fetchQueue: Array<{ imgElement: HTMLImageElement, fetchUrl: string, originalSrc: string, imgReqId: string }> = [];
+    let fetchTimeoutId: number | null = null;
+
+    let classifyQueue: Array<{ imgElement: HTMLImageElement, imageDataUrl: string, originalSrc: string, imgReqId: string }> = [];
+    let classifyTimeoutId: number | null = null;
+    let nextImgReqId = 0;
+
+    function generateImgReqId(): string {
+        return `img-${nextImgReqId++}`;
+    }
 
     function setFilterDisabledVisualState(isDisabled: boolean) {
         if (isDisabled) {
@@ -19,33 +35,130 @@
         }
     }
 
-    async function requestClassification(imgElement: HTMLImageElement): Promise<void> {
+    async function processFetchQueue() {
+        if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
+        fetchTimeoutId = null;
+        if (fetchQueue.length === 0) return;
+
+        const batchToFetch = [...fetchQueue];
+        fetchQueue = []; // Clear queue for next batch
+
+        const urlsToFetch = batchToFetch.map(item => item.fetchUrl);
+        console.log(`CS: Processing fetch queue for ${batchToFetch.length} items. URLs:`, urlsToFetch.map(u => u.substring(0, 60)));
+
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'BATCH_FETCH_IMAGE_DATAURLS', urls: urlsToFetch });
+            if (response?.status === 'success' && response.results) {
+                response.results.forEach((result: { fetchUrl: string, dataUrl: string | null, error?: string }) => {
+                    const correspondingItems = batchToFetch.filter(item => item.fetchUrl === result.fetchUrl);
+                    correspondingItems.forEach(item => {
+                        if (result.dataUrl) {
+                            console.log(`CS: Successfully fetched data URL for ${item.originalSrc.substring(0, 60)}`);
+                            // Add to classification queue
+                            classifyQueue.push({ imgElement: item.imgElement, imageDataUrl: result.dataUrl, originalSrc: item.originalSrc, imgReqId: item.imgReqId });
+                            if (classifyQueue.length >= CLASSIFY_QUEUE_MAX_SIZE) {
+                                processClassifyQueue();
+                            } else if (!classifyTimeoutId) {
+                                classifyTimeoutId = window.setTimeout(processClassifyQueue, CLASSIFY_QUEUE_DEBOUNCE_MS);
+                            }
+                        } else {
+                            console.warn(`CS: Failed to fetch data URL for ${item.originalSrc.substring(0, 60)}: ${result.error}`);
+                            item.imgElement.dataset.nsfwClassification = "fetch-error";
+                            processingItems.delete(item.originalSrc); // Remove from global processing set
+                        }
+                    });
+                });
+            } else {
+                console.error("CS: BATCH_FETCH_IMAGE_DATAURLS failed or returned invalid response:", response);
+                batchToFetch.forEach(item => {
+                    item.imgElement.dataset.nsfwClassification = "fetch-error";
+                    processingItems.delete(item.originalSrc);
+                });
+            }
+        } catch (error: any) {
+            console.error(`CS: Error sending BATCH_FETCH_IMAGE_DATAURLS: ${error.message}`);
+            batchToFetch.forEach(item => {
+                item.imgElement.dataset.nsfwClassification = "fetch-error";
+                processingItems.delete(item.originalSrc);
+            });
+        }
+    }
+
+    async function processClassifyQueue() {
+        if (classifyTimeoutId) clearTimeout(classifyTimeoutId);
+        classifyTimeoutId = null;
+        if (classifyQueue.length === 0) return;
+
+        const batchToClassify = [...classifyQueue];
+        classifyQueue = []; // Clear for next batch
+
+        const itemsToClassify = batchToClassify.map(item => ({ imgReqId: item.imgReqId, imageDataUrl: item.imageDataUrl, originalSrc: item.originalSrc }));
+        console.log(`CS: Processing classify queue for ${batchToClassify.length} items.`);
+
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'BATCH_CLASSIFY_IMAGE_DATAURLS', items: itemsToClassify });
+            if (response?.status === 'success' && response.results) {
+                response.results.forEach((result: { imgReqId: string, originalSrc: string, label?: string, error?: string }) => {
+                    const item = batchToClassify.find(i => i.imgReqId === result.imgReqId);
+                    if (item) {
+                        if (result.label) {
+                            console.log(`CS: Classified ${item.originalSrc.substring(0, 60)} as: ${result.label}`);
+                            item.imgElement.dataset.nsfwClassification = result.label;
+                        } else {
+                            console.error(`CS: Classification failed for ${item.originalSrc.substring(0, 60)}: ${result.error || 'Unknown classification error'}`);
+                            item.imgElement.dataset.nsfwClassification = result.error?.replace('error: ', '') || "cls-error";
+                        }
+                        processingItems.delete(item.originalSrc);
+                    }
+                });
+            } else {
+                console.error("CS: BATCH_CLASSIFY_IMAGE_DATAURLS failed or returned invalid response:", response);
+                batchToClassify.forEach(item => {
+                    item.imgElement.dataset.nsfwClassification = "cls-batch-error";
+                    processingItems.delete(item.originalSrc);
+                });
+            }
+        } catch (error: any) {
+            console.error(`CS: Error sending BATCH_CLASSIFY_IMAGE_DATAURLS: ${error.message}`);
+            batchToClassify.forEach(item => {
+                item.imgElement.dataset.nsfwClassification = "cls-batch-error";
+                processingItems.delete(item.originalSrc);
+            });
+        }
+    }
+
+    // This function is called when an image is ready to be processed (e.g., visible, loaded)
+    async function stageImageForProcessing(imgElement: HTMLImageElement): Promise<void> {
         if (!isFilterGloballyActive) return;
 
-        const originalSrc = imgElement.getAttribute('src');
-        // Use imgElement.dataset.nsfwOriginalSrc if available, as originalSrc might be a blob/data URL by now
-        const srcForProcessingItem = imgElement.dataset.nsfwOriginalSrc || originalSrc;
+        const originalSrc = imgElement.dataset.nsfwOriginalSrc || imgElement.getAttribute('src');
+        if (!originalSrc || processingItems.has(originalSrc)) return;
 
-        if (!originalSrc || (srcForProcessingItem && processingItems.has(srcForProcessingItem))) return;
-
-        // Check if already finally classified (not pending)
         if (imgElement.dataset.nsfwClassification && imgElement.dataset.nsfwClassification !== "pending") {
-            return;
+            return; // Already finally classified
         }
 
-        console.log(`CS: Requesting classification for: ${(imgElement.dataset.nsfwOriginalSrc || originalSrc).substring(0, 100)}`);
-        if (srcForProcessingItem) processingItems.add(srcForProcessingItem);
-        imgElement.dataset.nsfwOriginalSrc = imgElement.dataset.nsfwOriginalSrc || originalSrc; // Ensure original src is stored
+        console.log(`CS: Staging for processing: ${originalSrc.substring(0, 100)}`);
+        processingItems.add(originalSrc);
+        imgElement.dataset.nsfwOriginalSrc = originalSrc; // Ensure it's set
         imgElement.dataset.nsfwClassification = "pending";
+        const imgReqId = generateImgReqId();
 
-        let imageDataSource: string | null = null;
-        let fetchError: string | null = null;
-        const isPotentiallyRelative = originalSrc.startsWith('./') || originalSrc.startsWith('../') || originalSrc.startsWith('/');
         let fetchableUrl = originalSrc;
+        // let needsFetching = true;
+        let fetchError = null;
 
         if (originalSrc.startsWith('data:image')) {
-            imageDataSource = originalSrc;
+            // needsFetching = false;
+            // Add directly to classification queue
+            classifyQueue.push({ imgElement, imageDataUrl: originalSrc, originalSrc, imgReqId });
+            if (classifyQueue.length >= CLASSIFY_QUEUE_MAX_SIZE) {
+                processClassifyQueue();
+            } else if (!classifyTimeoutId) {
+                classifyTimeoutId = window.setTimeout(processClassifyQueue, CLASSIFY_QUEUE_DEBOUNCE_MS);
+            }
         } else {
+            const isPotentiallyRelative = originalSrc.startsWith('./') || originalSrc.startsWith('../') || originalSrc.startsWith('/');
             if (isPotentiallyRelative) {
                 try {
                     fetchableUrl = new URL(originalSrc, document.baseURI).href;
@@ -55,94 +168,52 @@
             }
 
             if (!fetchError && (fetchableUrl.startsWith('http:') || fetchableUrl.startsWith('https:') || fetchableUrl.startsWith('blob:') || fetchableUrl.startsWith('chrome-extension:'))) {
-                console.log(`CS: Requesting data URL from background for: ${fetchableUrl.substring(0, 100)}`);
-                try {
-                    const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_DATAURL', url: fetchableUrl });
-                    if (response?.status === 'success' && response.dataUrl) {
-                        imageDataSource = response.dataUrl;
-                    } else {
-                        fetchError = `Failed to get data URL: ${response?.message || 'Background error'}`;
-                    }
-                } catch (error: any) {
-                    fetchError = `Error communicating with background for fetch: ${error.message}`;
+                fetchQueue.push({ imgElement, fetchUrl: fetchableUrl, originalSrc, imgReqId });
+                if (fetchQueue.length >= FETCH_QUEUE_MAX_SIZE) {
+                    processFetchQueue();
+                } else if (!fetchTimeoutId) {
+                    fetchTimeoutId = window.setTimeout(processFetchQueue, FETCH_QUEUE_DEBOUNCE_MS);
                 }
-            } else if (!fetchError) {
-                fetchError = `Skipping image with non-fetchable src scheme: ${fetchableUrl.substring(0, 100)}`;
+            } else {
+                fetchError = fetchError || `Skipping image with non-fetchable src scheme: ${fetchableUrl.substring(0, 100)}`;
             }
         }
-
-        const finalSrcToUseForDeletion = imgElement.dataset.nsfwOriginalSrc || originalSrc; // src used in processingItems
 
         if (fetchError) {
-            console.warn(`CS: ${fetchError} for original src ${finalSrcToUseForDeletion}`);
-            imgElement.dataset.nsfwClassification = "fetch-error";
-            if (finalSrcToUseForDeletion) processingItems.delete(finalSrcToUseForDeletion);
-            return;
-        }
-
-        if (imageDataSource) {
-            console.log(`CS: Sending image data for classification (src: ${finalSrcToUseForDeletion.substring(0, 100)})`);
-            try {
-                chrome.runtime.sendMessage(
-                    { type: 'CLASSIFY_IMAGE_DATAURL', imageDataUrl: imageDataSource, originalUrl: finalSrcToUseForDeletion },
-                    (response) => {
-                        if (finalSrcToUseForDeletion) processingItems.delete(finalSrcToUseForDeletion);
-                        if (chrome.runtime.lastError) {
-                            console.error(`CS: Communication error for ${finalSrcToUseForDeletion.substring(0, 100)}: ${chrome.runtime.lastError.message}`);
-                            imgElement.dataset.nsfwClassification = "comm-error";
-                            return;
-                        }
-                        let finalLabel = "error";
-                        if (response?.status === 'success') {
-                            finalLabel = response.label || "unknown";
-                            console.log(`CS: Classified ${finalSrcToUseForDeletion.substring(0, 100)} as: ${finalLabel}`);
-                        } else {
-                            finalLabel = response?.message?.replace('error: ', '') || "bg-error";
-                            console.error(`CS: Background classification failed for ${finalSrcToUseForDeletion.substring(0, 100)}: ${response?.message}`);
-                        }
-                        imgElement.dataset.nsfwClassification = finalLabel;
-                    }
-                );
-            } catch (error: any) {
-                console.error(`CS: Synchronous error sending classification message for ${finalSrcToUseForDeletion.substring(0, 100)}: ${error.message}`);
-                imgElement.dataset.nsfwClassification = "send-error";
-                if (finalSrcToUseForDeletion) processingItems.delete(finalSrcToUseForDeletion);
-            }
-        } else {
-            console.log(`CS: No image data source to classify for ${finalSrcToUseForDeletion.substring(0, 100)}.`);
-            imgElement.dataset.nsfwClassification = "fetch-error";
-            if (finalSrcToUseForDeletion) processingItems.delete(finalSrcToUseForDeletion);
+            console.warn(`CS: ${fetchError} for original src ${originalSrc}`);
+            imgElement.dataset.nsfwClassification = "stage-fetch-error";
+            processingItems.delete(originalSrc);
         }
     }
 
     async function processAndClassifyImage(imgElement: HTMLImageElement) {
         if (imageIntersectionObserver) {
-            imageIntersectionObserver.unobserve(imgElement); // Stop observing once it's visible and being processed
+            imageIntersectionObserver.unobserve(imgElement);
         }
 
-        const currentSrc = imgElement.getAttribute('src');
+        const currentSrc = imgElement.dataset.nsfwOriginalSrc || imgElement.getAttribute('src');
         if (!currentSrc || (imgElement.dataset.nsfwClassification && imgElement.dataset.nsfwClassification !== 'pending')) {
-            return; // No src or already finally classified
+            return;
         }
 
         if (imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
-            await requestClassification(imgElement);
+            await stageImageForProcessing(imgElement);
         } else if (!imgElement.complete && currentSrc) {
-            const nsfwOriginalSrcForListeners = imgElement.dataset.nsfwOriginalSrc || currentSrc;
+            const nsfwOriginalSrcForListeners = currentSrc;
             const onLoad = async () => {
                 cleanupListeners();
                 if (imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
-                    await requestClassification(imgElement);
+                    await stageImageForProcessing(imgElement);
                 } else {
                     imgElement.dataset.nsfwClassification = 'zero-dimensions';
-                    if (nsfwOriginalSrcForListeners) processingItems.delete(nsfwOriginalSrcForListeners);
+                    processingItems.delete(nsfwOriginalSrcForListeners);
                 }
             };
             const onError = () => {
                 cleanupListeners();
                 console.warn(`CS: Image native load error (after intersection): ${imgElement.src?.substring(0, 100)}`);
                 imgElement.dataset.nsfwClassification = 'native-load-error';
-                if (nsfwOriginalSrcForListeners) processingItems.delete(nsfwOriginalSrcForListeners);
+                processingItems.delete(nsfwOriginalSrcForListeners);
             };
             const cleanupListeners = () => {
                 imgElement.removeEventListener('load', onLoad);
@@ -152,8 +223,7 @@
             imgElement.addEventListener('error', onError);
         } else if (currentSrc) {
             imgElement.dataset.nsfwClassification = 'zero-dimensions';
-            const nsfwOriginalSrcForDeletion = imgElement.dataset.nsfwOriginalSrc || currentSrc;
-            if (nsfwOriginalSrcForDeletion) processingItems.delete(nsfwOriginalSrcForDeletion);
+            processingItems.delete(currentSrc);
         }
     }
 
@@ -179,16 +249,13 @@
             }
         }
 
-        // If not finally classified, mark as pending and observe
         if (!imgNode.dataset.nsfwClassification || imgNode.dataset.nsfwClassification === 'pending') {
             imgNode.dataset.nsfwClassification = "pending";
-            imgNode.dataset.nsfwOriginalSrc = currentSrc; // Track current src for changes and for processingItems
+            imgNode.dataset.nsfwOriginalSrc = currentSrc;
             if (imageIntersectionObserver) {
                 imageIntersectionObserver.observe(imgNode);
             }
-        } else {
-            // Already has a final classification, do nothing unless src changed (handled above)
-        }
+        } 
     }
 
     function processDomNode(node: Node) {
@@ -202,11 +269,10 @@
     }
 
     function startObservers() {
-        if (mutationObserver && imageIntersectionObserver) return; // Already started
+        if (mutationObserver && imageIntersectionObserver) return;
 
         console.log("CS: Starting MutationObserver and IntersectionObserver.");
-
-        // Initialize IntersectionObserver
+        
         if (imageIntersectionObserver) imageIntersectionObserver.disconnect();
         imageIntersectionObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -215,12 +281,11 @@
                 }
             });
         }, {
-            root: null,
-            rootMargin: '0px 0px 250px 0px', // Start loading when image is 250px from bottom of viewport
-            threshold: 0.01
+            root: null, 
+            rootMargin: '0px 0px 250px 0px',
+            threshold: 0.01 
         });
 
-        // Initialize MutationObserver
         if (mutationObserver) mutationObserver.disconnect();
         mutationObserver = new MutationObserver((mutations) => {
             if (!isFilterGloballyActive || document.body.classList.contains(BODY_CLASS_DISABLED)) return;
@@ -230,7 +295,7 @@
                     mutation.addedNodes.forEach(node => processDomNode(node));
                 } else if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target instanceof HTMLImageElement) {
                     console.log(`CS Obsrv: Image src attribute changed on:`, mutation.target);
-                    processImageNode(mutation.target); // Re-evaluate the image for observation
+                    processImageNode(mutation.target);
                 }
             }
         });
@@ -252,13 +317,22 @@
             imageIntersectionObserver = null;
             console.log("CS: IntersectionObserver stopped.");
         }
+        // Clear any pending timeouts for queues
+        if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
+        fetchTimeoutId = null;
+        if (classifyTimeoutId) clearTimeout(classifyTimeoutId);
+        classifyTimeoutId = null;
+        // Clear queues and processing items
+        fetchQueue = [];
+        classifyQueue = [];
+        processingItems.clear();
+
         setFilterDisabledVisualState(true);
         console.log("CS: Removing all NSFW classification attributes for cleanup...");
         document.querySelectorAll('[data-nsfw-classification]').forEach(el => {
             el.removeAttribute('data-nsfw-classification');
             el.removeAttribute('data-nsfw-original-src');
         });
-        processingItems.clear();
         console.log("CS: Filtering stopped and elements revealed.");
     }
 
@@ -287,7 +361,7 @@
             if (message.type === 'START_FILTERING') {
                 isFilterGloballyActive = true;
                 setFilterDisabledVisualState(false);
-                startObservers();
+                startObservers(); 
                 sendResponse({ status: 'started' });
             } else if (message.type === 'STOP_FILTERING') {
                 isFilterGloballyActive = false;

@@ -183,9 +183,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'FETCH_IMAGE_DATAURL' && message.url) {
         const imageUrl: string = message.url;
-        // The `isLocalPath` flag is removed from here; content script should resolve local paths first
-        // or send extension URLs that `fetch` can handle.
-
         console.log(`BG: Received FETCH_IMAGE_DATAURL for: ${imageUrl.substring(0, 100)}`);
 
         if (imageUrl.startsWith('data:image')) {
@@ -193,27 +190,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ status: 'success', dataUrl: imageUrl });
             return false; // Synchronous response
         }
-
-        // Validate if it's a scheme fetch can handle, otherwise error.
-        // Blob URLs are also fine.
-        if (!imageUrl.startsWith('http:') && !imageUrl.startsWith('https:') && !imageUrl.startsWith('blob:')) {
+        if (!imageUrl.startsWith('http:') && !imageUrl.startsWith('https:') && !imageUrl.startsWith('blob:') && !imageUrl.startsWith('chrome-extension:')) {
             console.warn(`BG: Invalid image URL scheme for background fetch: ${imageUrl}`);
             sendResponse({ status: 'error', message: 'Invalid URL scheme for background fetch' });
             return false;
         }
-
         fetchImageAsDataUrl(imageUrl)
             .then(dataUrl => {
-                console.log(`BG: Successfully fetched and converted image to data URL for: ${imageUrl.substring(0, 100)}`);
                 sendResponse({ status: 'success', dataUrl });
             })
             .catch(error => {
-                console.error(`BG: Error fetching/converting image ${imageUrl}:`, error);
-                sendResponse({
-                    status: 'error',
-                    message: error.message || 'Failed to fetch or convert image'
-                });
+                sendResponse({ status: 'error', message: error.message || 'Failed to fetch or convert image' });
             });
+        return true; // Indicates asynchronous response
+    }
+
+    if (message.type === 'BATCH_FETCH_IMAGE_DATAURLS' && Array.isArray(message.urls)) {
+        console.log(`BG: Received BATCH_FETCH_IMAGE_DATAURLS for ${message.urls.length} URLs.`);
+        const urls: string[] = message.urls;
+        Promise.all(urls.map(url =>
+            fetchImageAsDataUrl(url)
+                .then(dataUrl => ({ fetchUrl: url, dataUrl, error: null }))
+                .catch(error => ({ fetchUrl: url, dataUrl: null, error: error.message || 'Failed to fetch' }))
+        )).then(results => {
+            sendResponse({ status: 'success', results });
+        }).catch(batchError => {
+            console.error("BG: Unexpected error in BATCH_FETCH_IMAGE_DATAURLS Promise.all:", batchError);
+            const errorResults = urls.map(url => ({ fetchUrl: url, dataUrl: null, error: 'Batch processing error' }));
+            sendResponse({ status: 'error', results: errorResults, message: 'Batch fetch failed catastrophically' });
+        });
         return true; // Indicates asynchronous response
     }
 
@@ -233,6 +238,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 console.error("BG: Unexpected error handling classification request:", error);
                 sendResponse({ status: 'error', message: error.message || 'Internal background error' });
             });
+        return true; // Indicates asynchronous response
+    }
+
+    if (message.type === 'BATCH_CLASSIFY_IMAGE_DATAURLS' && Array.isArray(message.items)) {
+        console.log(`BG: Received BATCH_CLASSIFY_IMAGE_DATAURLS for ${message.items.length} items.`);
+        const items: Array<{imgReqId: string, imageDataUrl: string, originalSrc: string}> = message.items;
+
+        Promise.all(items.map(item =>
+            classifyImageData(item.imageDataUrl)
+                .then(label => ({ imgReqId: item.imgReqId, originalSrc: item.originalSrc, label, error: null }))
+                .catch(error => ({ imgReqId: item.imgReqId, originalSrc: item.originalSrc, label: null, error: `Error during classification: ${error.message || 'Unknown classification failure'}` }))
+        )).then(results => {
+            const finalResults = results.map(r => {
+                if (r.error) {
+                    return { imgReqId: r.imgReqId, originalSrc: r.originalSrc, error: r.error };
+                }
+                if (r.label && r.label.startsWith('error:')) {
+                    return { imgReqId: r.imgReqId, originalSrc: r.originalSrc, error: r.label };
+                }
+                if (r.label === null) {
+                    return { imgReqId: r.imgReqId, originalSrc: r.originalSrc, error: 'Classification resolved to null' };
+                }
+                return {
+                    imgReqId: r.imgReqId,
+                    originalSrc: r.originalSrc,
+                    label: r.label
+                };
+            });
+            sendResponse({ status: 'success', results: finalResults });
+        }).catch(batchError => {
+            console.error("BG: Unexpected error in BATCH_CLASSIFY_IMAGE_DATAURLS Promise.all:", batchError);
+            const errorResults = items.map(item => ({ imgReqId: item.imgReqId, originalSrc: item.originalSrc, error: 'Batch classification processing error' }));
+            sendResponse({ status: 'error', results: errorResults, message: 'Batch classification failed catastrophically' });
+        });
         return true; // Indicates asynchronous response
     }
 
