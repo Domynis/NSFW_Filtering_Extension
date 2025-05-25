@@ -63,50 +63,56 @@ onMounted(syncState);
     <header class="popup-header">
       <h1>NSFW Filter</h1>
     </header>
-    <div class="status-section">
-      <p class="status-text">
-        Status:
-        <span v-if="isLoading" class="loading-text">Loading...</span>
-        <span v-else :class="['status-indicator', isFilterActive ? 'active' : 'inactive']">
-          {{ isFilterActive ? 'Active' : 'Inactive' }}
-        </span>
-      </p>
+    <div class="content-area">
+      <div class="status-section">
+        <p class="status-text">
+          Status:
+          <span v-if="isLoading" class="loading-text">Loading...</span>
+          <span v-else :class="['status-indicator', isFilterActive ? 'active' : 'inactive']">
+            {{ isFilterActive ? 'Active' : 'Inactive' }}
+          </span>
+        </p>
+      </div>
+      <button type="button" @click="toggleFilter" :disabled="isLoading"
+        :class="['toggle-button', isFilterActive ? 'active-button' : 'inactive-button']">
+        <span v-if="isLoading">Please wait...</span>
+        <span v-else>{{ isFilterActive ? 'Deactivate Filter' : 'Activate Filter' }}</span>
+      </button>
     </div>
-    <button type="button" @click="toggleFilter" :disabled="isLoading"
-      :class="['toggle-button', isFilterActive ? 'active-button' : 'inactive-button']">
-      <span v-if="isLoading">Please wait...</span>
-      <span v-else>{{ isFilterActive ? 'Deactivate Filter' : 'Activate Filter' }}</span>
-    </button>
   </div>
 </template>
 
 <style scoped>
 .popup-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  padding: 18px;
+  padding: 0;
   min-width: 280px;
   text-align: center;
   background-color: #f9f9f9;
   color: #333;
   border-radius: 10px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .popup-header {
-  padding-bottom: 15px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #eeeeee;
+  background-color: #0066CC;
+  padding: 20px 18px;
 }
 
 h1 {
-  font-size: 3em;
-  color: #333333;
+  font-size: 2.2em;
+  color: #ffffff;
   margin-top: 0;
   margin-bottom: 0;
   font-weight: 600;
   letter-spacing: 0.5px;
+}
+
+.content-area {
+  padding: 20px 18px;
 }
 
 .status-section {
@@ -124,12 +130,12 @@ h1 {
 
 .loading-text {
   font-style: italic;
-  color: #007bff;
+  color: #0066CC;
 }
 
 .status-indicator {
   font-weight: bold;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 16px;
   margin-left: 8px;
   font-size: 0.9em;
@@ -138,12 +144,12 @@ h1 {
 }
 
 .status-indicator.active {
-  background-color: #4CAF50;
+  background-color: #28a745;
   color: white;
 }
 
 .status-indicator.inactive {
-  background-color: #f44336;
+  background-color: #dc3545;
   color: white;
 }
 
@@ -172,11 +178,11 @@ h1 {
 }
 
 .toggle-button.inactive-button {
-  background-color: #007bff;
+  background-color: #0066CC;
 }
 
 .toggle-button.inactive-button:hover:not(:disabled) {
-  background-color: #0056b3;
+  background-color: #0052a3;
 }
 
 .toggle-button.active-button {
