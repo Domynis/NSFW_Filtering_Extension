@@ -294,14 +294,31 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 });
 
+console.log("BG: Service worker started.");
+
 chrome.runtime.onInstalled.addListener(async (details) => {
     console.log("BG: Extension installed/updated.", details.reason);
     if (details.reason === 'install') {
         await setFilterState(false);
         console.log("BG: Filter set to inactive on first install.");
     }
-    // Optional: Pre-load model on install/update
-    // loadModelInBackground().then(() => console.log("BG: Pre-emptive model load attempt finished on install/update."));
+    // Pre-load model on install/update
+    loadModelInBackground().then(() => {
+        console.log("BG: Pre-emptive model load attempt finished on install/update.");
+    }).catch(error => {
+        console.error("BG: Error during pre-emptive model load on install/update:", error);
+    });
 });
 
-console.log("BG: Service worker started.");
+chrome.runtime.onStartup.addListener(async () => {
+    console.log("BG: Browser startup detected.");
+    // Pre-load model on browser startup
+    // Optionally, you could check if the filter is active first:
+    // const isActive = await getFilterState();
+    // if (isActive) { ... }
+    loadModelInBackground().then(() => {
+        console.log("BG: Pre-emptive model load attempt finished on startup.");
+    }).catch(error => {
+        console.error("BG: Error during pre-emptive model load on startup:", error);
+    });
+});
