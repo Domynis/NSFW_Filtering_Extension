@@ -59,25 +59,129 @@ onMounted(syncState);
 </script>
 
 <template>
-  <h1>NSFW Filter</h1>
-  <div class="card">
-    <p>Filter Status: {{ isLoading ? 'Loading...' : (isFilterActive ? 'Active' : 'Inactive') }}</p>
-    <button type="button" @click="toggleFilter" :disabled="isLoading">
-      {{ isFilterActive ? 'Deactivate Filter' : 'Activate Filter' }}
+  <div class="popup-container">
+    <h1>NSFW Filter</h1>
+    <div class="status-section">
+      <p class="status-text">
+        Status:
+        <span v-if="isLoading" class="loading-text">Loading...</span>
+        <span v-else :class="['status-indicator', isFilterActive ? 'active' : 'inactive']">
+          {{ isFilterActive ? 'Active' : 'Inactive' }}
+        </span>
+      </p>
+    </div>
+    <button type="button" @click="toggleFilter" :disabled="isLoading"
+      :class="['toggle-button', isFilterActive ? 'active-button' : 'inactive-button']">
+      <span v-if="isLoading">Please wait...</span>
+      <span v-else>{{ isFilterActive ? 'Deactivate Filter' : 'Activate Filter' }}</span>
     </button>
   </div>
 </template>
 
 <style scoped>
-.card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+.popup-container {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  padding: 12px;
+  /* Reduced padding */
+  min-width: 280px;
+  text-align: center;
+  background-color: #f9f9f9;
+  color: #333;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-button:disabled {
-  opacity: 0.5;
+h1 {
+  font-size: 1.6em;
+  color: #2c3e50;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-weight: 600;
+}
+
+.status-section {
+  margin-bottom: 25px;
+}
+
+.status-text {
+  font-size: 1em;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+}
+
+.loading-text {
+  font-style: italic;
+  color: #007bff;
+}
+
+.status-indicator {
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 16px;
+  margin-left: 8px;
+  font-size: 0.9em;
+  line-height: 1.2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.status-indicator.active {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.status-indicator.inactive {
+  background-color: #f44336;
+  color: white;
+}
+
+.toggle-button {
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  font-size: 1em;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out, transform 0.1s ease, box-shadow 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-button:active:not(:disabled) {
+  transform: translateY(0px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-button.inactive-button {
+  background-color: #007bff;
+}
+
+.toggle-button.inactive-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.toggle-button.active-button {
+  background-color: #dc3545;
+}
+
+.toggle-button.active-button:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.toggle-button:disabled {
+  background-color: #cccccc;
+  color: #666666;
   cursor: not-allowed;
+  opacity: 0.7;
+  box-shadow: none;
 }
 </style>
