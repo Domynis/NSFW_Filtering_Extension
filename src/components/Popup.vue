@@ -60,7 +60,9 @@ onMounted(syncState);
 
 <template>
   <div class="popup-container">
-    <h1>NSFW Filter</h1>
+    <header class="popup-header">
+      <h1>NSFW Filter</h1>
+    </header>
     <div class="status-section">
       <p class="status-text">
         Status:
@@ -81,22 +83,30 @@ onMounted(syncState);
 <style scoped>
 .popup-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  padding: 12px;
-  /* Reduced padding */
+  padding: 18px;
   min-width: 280px;
   text-align: center;
   background-color: #f9f9f9;
   color: #333;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.popup-header {
+  padding-bottom: 15px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #eeeeee;
 }
 
 h1 {
-  font-size: 1.6em;
-  color: #2c3e50;
+  font-size: 1.5em;
+  color: #333333;
   margin-top: 0;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .status-section {
