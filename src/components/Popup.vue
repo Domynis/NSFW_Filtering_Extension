@@ -4,56 +4,51 @@ import { ref, onMounted } from 'vue';
 const isFilterActive = ref(false);
 const isLoading = ref(true);
 
-// Function to get initial state from storage
 const syncState = async () => {
   isLoading.value = true;
   try {
     const data = await chrome.storage.local.get('isFilterActive');
-    isFilterActive.value = !!data.isFilterActive; // Default to false if undefined
+    isFilterActive.value = !!data.isFilterActive;
   } catch (error) {
-    console.error("Error getting filter state:", error);
-    isFilterActive.value = false; // Assume inactive on error
+    console.error("Popup: Error getting filter state:", error);
+    isFilterActive.value = false; // Default to inactive on error
   } finally {
     isLoading.value = false;
   }
 };
 
-// Function to toggle the state via background script
 const toggleFilter = () => {
   const newState = !isFilterActive.value;
-  isLoading.value = true; // Show loading until state confirmed
+  isLoading.value = true;
   chrome.runtime.sendMessage({ type: 'TOGGLE_FILTER', active: newState }, (response) => {
     if (chrome.runtime.lastError) {
-      console.error("Error sending toggle message:", chrome.runtime.lastError.message);
-      // Revert UI optimistic update or show error
+      console.error("Popup: Error sending toggle message:", chrome.runtime.lastError.message);
+      // Revert UI or show error, then resync
       isLoading.value = false;
-      // Optionally call syncState again to be sure
-      syncState();
+      syncState(); // Ensure UI reflects actual state after error
       return;
     }
     if (response?.status === 'success') {
-      console.log('Toggle message acknowledged by background.');
-      // Background script should update storage, rely on listener or syncState for UI update
-      // isFilterActive.value = newState; // Optimistic update (optional)
+      console.log('Popup: Toggle message acknowledged by background.');
+      // State will be updated by the storage listener
     } else {
-      console.error("Background script failed to toggle state.");
-      // Revert UI or show error
+      console.error("Popup: Background script failed to toggle state.", response?.message);
+      // Resync if background indicates an error
+      isLoading.value = false;
+      syncState();
     }
-    // Let the storage listener update the UI state definitively
-    // isLoading.value = false; // Handled by storage listener ideally
+    // isLoading is generally set to false by the storage listener
   });
 };
 
-// Listen for state changes from background/storage
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.isFilterActive) {
-    console.log('Popup received storage change:', changes.isFilterActive.newValue);
+    console.log('Popup: Received storage change for isFilterActive:', changes.isFilterActive.newValue);
     isFilterActive.value = !!changes.isFilterActive.newValue;
-    isLoading.value = false; // State confirmed
+    isLoading.value = false; // State confirmed, stop loading indicator
   }
 });
 
-// Get initial state when popup opens
 onMounted(syncState);
 
 </script>
