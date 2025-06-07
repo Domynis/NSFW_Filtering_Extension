@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>E2E Test Page</title>
+  <style>
+    body.nsfw-filter-disabled img.test-image.unsafe {
+      /* Example: if you apply a class to reveal, or change opacity */
+      /* filter: none !important; */
+    }
+    img.test-image.unsafe[data-nsfw-classification^="hentai"],
+    img.test-image.unsafe[data-nsfw-classification^="porn"] {
+        /* Your CSS might hide these by default when filter is active */
+    }
+  </style>
+</head>
+<body>
+  <h1>Image Classification Test Page</h1>
+
+  <h2>Visible Images</h2>
+  <img id="imageSfw1" class="test-image safe" src="https://via.placeholder.com/150/0000FF/FFFFFF?Text=SFW_Image_Neutral1" alt="SFW Image - Neutral 1">
+  <img id="imageNsfwPorn1" class="test-image unsafe" src="https://via.placeholder.com/150/FF0000/FFFFFF?Text=NSFW_Image_Porn1" alt="NSFW Image - Porn 1">
+  <img id="imageNsfwHentai1" class="test-image unsafe" src="https://via.placeholder.com/150/FF69B4/000000?Text=NSFW_Image_Hentai1" alt="NSFW Image - Hentai 1">
+  <img id="imageSfwDrawing1" class="test-image safe" src="https://via.placeholder.com/150/008000/FFFFFF?Text=SFW_Image_Drawing1" alt="SFW Image - Drawing 1">
+
+  <div style="margin-top: 500px; margin-bottom: 1500px; border: 1px solid #ccc; padding: 10px;">
+    <p>Content to push lazy loaded images further down.</p>
+    <p>Scroll down to see more images.</p>
+  </div>
+
+  <h2>Lazy Loaded Images (Initially Off-Screen)</h2>
+  <img id="lazyImageNsfwPorn2" class="test-image unsafe" src="https://via.placeholder.com/150/DC143C/FFFFFF?Text=Lazy_NSFW_Porn2" alt="Lazy NSFW Image - Porn 2">
+  <img id="lazyImageSfwNeutral2" class="test-image safe" src="https://via.placeholder.com/150/87CEEB/000000?Text=Lazy_SFW_Neutral2" alt="Lazy SFW Image - Neutral 2">
+
+</body>
+</html> 
