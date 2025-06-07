@@ -3,7 +3,7 @@ const EXTENSION_PATH = resolve(__dirname, 'dist');
 
 module.exports = {
   launch: {
-    headless: false, // Set to 'new' or true for headless mode
+    headless: false,
     args: [
       `--disable-extensions-except=${EXTENSION_PATH}`,
       `--load-extension=${EXTENSION_PATH}`,

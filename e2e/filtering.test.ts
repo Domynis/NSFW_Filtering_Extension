@@ -81,7 +81,7 @@ describe('NSFW Filtering Extension', () => {
                 return false;
             }
             return images.every(img => img.getAttribute('data-nsfw-classification') !== 'pending');
-        }, { timeout: 15000 }); // Wait up to 15 seconds
+        }, { timeout: 15000 });
 
         const classifications = await page.evaluate(() => {
             const images = Array.from(document.querySelectorAll('img'));
