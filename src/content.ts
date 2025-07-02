@@ -162,7 +162,7 @@
                 }
             }
 
-            if (!fetchError && (fetchableUrl.startsWith('http:') || fetchableUrl.startsWith('https:') || fetchableUrl.startsWith('blob:') || fetchableUrl.startsWith('chrome-extension:'))) {
+            if (!fetchError && (fetchableUrl.startsWith('file://') || fetchableUrl.startsWith('http:') || fetchableUrl.startsWith('https:') || fetchableUrl.startsWith('blob:') || fetchableUrl.startsWith('chrome-extension:'))) {
                 fetchQueue.push({ imgElement, fetchUrl: fetchableUrl, originalSrc, imgReqId });
                 if (fetchQueue.length >= FETCH_QUEUE_MAX_SIZE) {
                     processFetchQueue();

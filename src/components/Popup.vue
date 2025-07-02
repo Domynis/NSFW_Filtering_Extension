@@ -61,7 +61,7 @@ onMounted(syncState);
     <div class="content-area">
       <div class="status-section">
         <p class="status-text">
-          Status:
+          Status: 
           <span v-if="isLoading" class="loading-text">Loading...</span>
           <span v-else :class="['status-indicator', isFilterActive ? 'active' : 'inactive']">
             {{ isFilterActive ? 'Active' : 'Inactive' }}
